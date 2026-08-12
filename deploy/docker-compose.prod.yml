@@ -1,0 +1,114 @@
+# Production stack for a single t3.micro.
+#
+# Everything runs on one box on purpose. RDS and ElastiCache each have their own
+# free-tier allowance, but that is three services to keep inside three separate
+# limits, and the managed-service free tiers are the ones most likely to have
+# lapsed on a newer AWS account. One instance is one allowance and one thing to
+# reason about.
+#
+# Memory budget on 1 GB (plus 2 GB swap from user_data):
+#   postgres ~150M · proxy ~180M · mock ~120M · redis ~30M · caddy ~20M
+
+name: budget-controller
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      # Set SITE_ADDRESS to a domain for automatic HTTPS, or leave it as :80
+      # to serve plain HTTP on the instance's public IP.
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+      DASHBOARD_USER: ${DASHBOARD_USER:-admin}
+      DASHBOARD_PASSWORD_HASH: ${DASHBOARD_PASSWORD_HASH}
+      # Let's Encrypt contact address. Only used when SITE_ADDRESS is a real
+      # domain; without it here, a configured address would sit in .env and
+      # never reach Caddy.
+      ACME_EMAIL: ${ACME_EMAIL:-admin@example.com}
+    depends_on:
+      - proxy
+
+  proxy:
+    image: ${IMAGE:-ghcr.io/OWNER/agent-budget-controller:latest}
+    restart: unless-stopped
+    # Deliberately not published to the host: Caddy is the only way in.
+    expose:
+      - "8000"
+    environment:
+      DEV_MODE: services
+      DATABASE_URL: postgresql+asyncpg://budget:${POSTGRES_PASSWORD}@postgres:5432/budget_controller
+      REDIS_URL: redis://redis:6379/0
+      UPSTREAM_BASE_URL: http://mock:9000/v1
+      UPSTREAM_MODE: ${UPSTREAM_MODE:-mock}
+      API_KEY_PEPPER: ${API_KEY_PEPPER}
+      ENFORCEMENT_FAIL_MODE: closed
+      LOG_JSON: "true"
+      # Real provider keys, only consulted when UPSTREAM_MODE=live.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  mock:
+    image: ${IMAGE:-ghcr.io/OWNER/agent-budget-controller:latest}
+    restart: unless-stopped
+    command: ["uvicorn", "mock_llm.main:app", "--host", "0.0.0.0", "--port", "9000"]
+    expose:
+      - "9000"
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: budget
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: budget_controller
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Tuned down for 1 GB of RAM shared with four other containers.
+    command: >
+      postgres
+      -c shared_buffers=64MB
+      -c max_connections=50
+      -c effective_cache_size=192MB
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U budget -d budget_controller"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    # noeviction: a budget counter must never be silently dropped to make room.
+    # The counters are small; the ledger can rebuild them if Redis is lost.
+    command: >
+      redis-server
+      --save 60 1000
+      --maxmemory 128mb
+      --maxmemory-policy noeviction
+      --appendonly no
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  pgdata:
+  redisdata:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    # The criteria tests run against a live stack, so CI provides the real
+    # thing rather than mocking it — that is the whole point of those tests.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: budget
+          POSTGRES_PASSWORD: budget
+          POSTGRES_DB: budget_controller
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U budget"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+
+      redis:
+        image: redis:8-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s --health-timeout 3s --health-retries 5
+
+    env:
+      DEV_MODE: services
+      DATABASE_URL: postgresql+asyncpg://budget:budget@localhost:5432/budget_controller
+      REDIS_URL: redis://localhost:6379/0
+      UPSTREAM_BASE_URL: http://127.0.0.1:9000/v1
+      API_KEY_PEPPER: ci-pepper-not-a-secret
+      ENFORCEMENT_FAIL_MODE: closed
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Migrate and seed
+        run: |
+          alembic upgrade head
+          python -m scripts.seed
+
+      - name: Start the mock provider and the proxy
+        run: |
+          uvicorn mock_llm.main:app --port 9000 --log-level warning &
+          uvicorn app.main:app --port 8000 --log-level warning &
+          for i in $(seq 1 40); do
+            curl -sf http://127.0.0.1:8000/health >/dev/null && break
+            sleep 0.5
+          done
+          curl -sf http://127.0.0.1:8000/health
+
+      - name: Run the suite
+        run: pytest -q
+
+      - name: Reconciliation must be clean
+        # Redis and the ledger disagreeing is the one failure that would make
+        # every number in the product a lie, so it gates the build.
+        run: |
+          python -m scripts.reconcile | tee /tmp/reconcile.txt
+          grep -q "agree exactly" /tmp/reconcile.txt
+
+  image:
+    # Proves the Dockerfile still builds on every PR, without pushing anything.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

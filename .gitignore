@@ -1,0 +1,19 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.data/
+.embedded/
+.env
+*.rdb
+.DS_Store
+
+# --- Terraform -------------------------------------------------------------
+# State contains every secret in plaintext; tfvars contains them before that.
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/*.tfvars
+!terraform/*.tfvars.example
+terraform/.terraform.lock.hcl
+crash.log

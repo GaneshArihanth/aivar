@@ -1,0 +1,25 @@
+# Agent Budget Controller — runtime dependencies
+# Pinned to versions verified to ship cp314 wheels (no source builds on Python 3.14).
+
+# --- web layer ---
+fastapi==0.141.1
+uvicorn[standard]==0.41.0
+python-json-logger==4.0.0
+structlog==26.1.0
+
+# --- config / validation ---
+pydantic==2.13.0
+pydantic-settings==2.15.0
+
+# --- postgres ---
+SQLAlchemy[asyncio]==2.0.51
+asyncpg==0.31.0
+alembic==1.19.1
+aiosqlite==0.22.1          # embedded DEV_MODE fallback
+
+# --- redis ---
+redis==8.1.0
+fakeredis==2.37.0          # embedded DEV_MODE fallback
+
+# --- upstream http ---
+httpx==0.28.1

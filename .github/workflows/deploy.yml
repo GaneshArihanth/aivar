@@ -1,0 +1,135 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  # Never let two deploys race onto one instance.
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write   # push to ghcr.io
+  id-token: write   # request the OIDC token used to assume the AWS role
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+  # Must match `project` in terraform.tfvars — it is the EC2 tag the
+  # instance lookup filters on and the SSM namespace secrets live under.
+  PROJECT: budget-controller
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute tags
+        id: meta
+        run: |
+          # Deploy an immutable, commit-pinned tag; also move :latest so a
+          # manual `docker compose pull` on the box does something sensible.
+          echo "image=${IMAGE,,}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "lower=${IMAGE,,}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.lower }}:${{ github.sha }}
+            ${{ steps.meta.outputs.lower }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assume the AWS deploy role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Find the instance
+        id: instance
+        run: |
+          ID=$(aws ec2 describe-instances \
+            --filters "Name=tag:Project,Values=$PROJECT" \
+                      "Name=instance-state-name,Values=running" \
+            --query 'Reservations[0].Instances[0].InstanceId' --output text)
+          if [ "$ID" = "None" ] || [ -z "$ID" ]; then
+            echo "::error::No running instance tagged Project=$PROJECT. Has terraform apply run?"
+            exit 1
+          fi
+          echo "id=$ID" >> "$GITHUB_OUTPUT"
+
+      - name: Pin the image and redeploy
+        id: send
+        run: |
+          # Record which image this deploy wants, then run the instance's own
+          # redeploy script. The script re-reads SSM, so this one parameter is
+          # all the workflow needs to change.
+          aws ssm put-parameter --name "/$PROJECT/IMAGE" \
+            --type String --overwrite --value "${{ needs.build.outputs.image }}"
+
+          CMD=$(aws ssm send-command \
+            --instance-ids "${{ steps.instance.outputs.id }}" \
+            --document-name "AWS-RunShellScript" \
+            --comment "deploy ${GITHUB_SHA::7}" \
+            --parameters 'commands=["/usr/local/bin/redeploy"]' \
+            --timeout-seconds 600 \
+            --query 'Command.CommandId' --output text)
+          echo "cmd=$CMD" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for it, and show the output either way
+        run: |
+          CMD='${{ steps.send.outputs.cmd }}'
+          ID='${{ steps.instance.outputs.id }}'
+          for i in $(seq 1 60); do
+            STATUS=$(aws ssm get-command-invocation --command-id "$CMD" \
+              --instance-id "$ID" --query 'Status' --output text 2>/dev/null || echo Pending)
+            case "$STATUS" in
+              Success) break ;;
+              Failed|Cancelled|TimedOut)
+                echo "::error::Deploy $STATUS"
+                aws ssm get-command-invocation --command-id "$CMD" --instance-id "$ID" \
+                  --query 'StandardErrorContent' --output text
+                exit 1 ;;
+            esac
+            sleep 10
+          done
+          aws ssm get-command-invocation --command-id "$CMD" --instance-id "$ID" \
+            --query 'StandardOutputContent' --output text | tail -30
+
+      - name: Verify the deployed service is healthy
+        run: |
+          IP=$(aws ec2 describe-instances --instance-ids '${{ steps.instance.outputs.id }}' \
+            --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
+          # /health is the one path left unauthenticated, precisely so this
+          # check needs no credentials.
+          for i in $(seq 1 30); do
+            if curl -fsS --max-time 5 "http://$IP/health" | tee /tmp/h.json | grep -q '"status":"ok"'; then
+              echo "healthy: $(cat /tmp/h.json)"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::Deployed but /health never returned ok"
+          curl -sS --max-time 5 "http://$IP/health" || true
+          exit 1

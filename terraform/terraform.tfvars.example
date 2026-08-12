@@ -1,0 +1,51 @@
+# Copy to terraform.tfvars and fill in. That file is gitignored — it contains
+# secrets in plaintext, and so does terraform.tfstate.
+
+# ---------------------------------------------------------------- required
+
+# owner/repo. Scopes the OIDC trust policy so only your repository's workflows
+# can assume the deploy role.
+github_repository = "your-github-username/aivar"
+
+# The image the first boot pulls. After that the deploy workflow owns this
+# value and pins it to a commit SHA.
+image = "ghcr.io/your-github-username/aivar:latest"
+
+# bcrypt hash guarding the dashboard and /admin/*. Generate with:
+#   docker run --rm caddy:2-alpine caddy hash-password --plaintext 'a-long-password'
+dashboard_password_hash = "$2a$14$REPLACE_ME"
+
+# Set once and never change: it invalidates every issued agent key.
+#   python -c "import secrets; print(secrets.token_hex(32))"
+api_key_pepper = "REPLACE_ME"
+
+# Any strong random string.
+postgres_password = "REPLACE_ME"
+
+# ---------------------------------------------------------------- optional
+
+aws_region    = "us-east-1"
+project       = "budget-controller"
+instance_type = "t3.micro"
+
+# A domain gives automatic HTTPS. Point its A record at the instance IP that
+# `terraform output` prints, then re-apply with this set.
+# site_address = "budget.example.com"
+# acme_email   = "you@example.com"
+
+# "mock" keeps every call inside the bundled fake provider — free, and the
+# whole demo works. Switch to "live" only when you mean to spend real money.
+upstream_mode = "mock"
+
+# openai_api_key    = "sk-..."
+# anthropic_api_key = "sk-ant-..."
+# gemini_api_key    = "..."
+
+# Narrow this to your own address to keep the dashboard off the open internet
+# entirely. Agents calling in from elsewhere would then need adding here too.
+# allowed_cidrs = ["203.0.113.4/32"]
+
+# Set false if this AWS account already has the GitHub OIDC provider. It is
+# account-wide and can only exist once — a second `terraform apply` in the same
+# account will fail on this otherwise.
+# create_oidc_provider = false

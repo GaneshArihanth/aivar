@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.data/
+.embedded/
+.env
+*.rdb
+.git/
+.github/
+terraform/
+tests/
+docs/
+*.md
+!README.md
+.DS_Store

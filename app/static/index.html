@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Agent Budget Controller</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">◈</span>
+      <div>
+        <h1>Agent Budget Controller</h1>
+        <p class="sub">
+          Enforcing spend limits <em>before</em> dispatch ·
+          period <span id="period">—</span> ·
+          resets <span id="resets">—</span>
+        </p>
+      </div>
+    </div>
+
+    <nav class="nav" aria-label="Primary">
+      <a class="nav-link" data-nav href="#/">Dashboard</a>
+      <a class="nav-link" data-nav href="#/agents">Agents</a>
+      <a class="nav-link" data-nav href="#/teams">Teams</a>
+      <a class="nav-link" data-nav href="#/models">Models</a>
+    </nav>
+
+    <div class="topbar-actions">
+      <span id="live" class="live live--off" title="Live event stream status">
+        <span class="dot"></span><span id="live-text">connecting</span>
+      </span>
+      <button id="freeze-btn" class="btn btn--ghost" title="Stop all dispatch">
+        Freeze all
+      </button>
+      <button id="new-agent-btn" class="btn btn--primary">+ New Agent</button>
+    </div>
+  </header>
+
+  <div id="freeze-banner"></div>
+
+  <main id="view"></main>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script type="module" src="/static/js/main.js"></script>
+</body>
+</html>

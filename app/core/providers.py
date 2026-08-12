@@ -1,0 +1,229 @@
+"""Provider adapters: request/response translation per wire format.
+
+The proxy speaks one dialect to its callers — OpenAI's ``/v1/chat/completions``
+— and whatever each upstream needs on the other side. This module is that
+seam, and it is what makes a cross-provider fallback chain possible at all: a
+chain that steps from GPT-4o to Claude has to change request shape, header
+scheme and usage field names mid-flight, and the caller must never see it.
+
+Two kinds are implemented:
+
+* ``openai`` — the OpenAI Chat Completions schema. This covers far more than
+  OpenAI: Azure OpenAI, Ollama, vLLM, LM Studio, Groq, Together, Fireworks and
+  Gemini's compatibility endpoint all speak it, so registering a self-hosted
+  model needs no new code, just a base URL.
+* ``anthropic`` — the native Messages API, which differs in three ways that
+  matter: the system prompt is a top-level field rather than a message,
+  ``max_tokens`` is required, and usage is reported as
+  ``input_tokens``/``output_tokens``.
+
+Bedrock and Vertex are deliberately *not* implemented natively — both need
+request signing (SigV4 / Google auth) rather than a bearer token, which is a
+different problem from format translation. They can still be registered and
+routed through any OpenAI-compatible gateway in front of them; the catalog UI
+says so rather than offering a setting that silently fails.
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from typing import Any
+
+import structlog
+
+log = structlog.get_logger(__name__)
+
+# Wire formats this proxy can actually dispatch.
+DISPATCHABLE_KINDS = ("openai", "anthropic")
+
+# Everything selectable in the catalog UI. The non-dispatchable ones are
+# registerable for pricing and policy, and route through a compatible gateway.
+PROVIDER_KINDS = {
+    "openai": {
+        "label": "OpenAI-compatible",
+        "dispatchable": True,
+        "hint": "OpenAI, Azure OpenAI, Ollama, vLLM, LM Studio, Groq, Together, "
+        "Gemini (compatibility endpoint) — anything serving /v1/chat/completions.",
+        "default_base_url": "https://api.openai.com/v1",
+    },
+    "anthropic": {
+        "label": "Anthropic Messages",
+        "dispatchable": True,
+        "hint": "Anthropic's native /v1/messages API.",
+        "default_base_url": "https://api.anthropic.com/v1",
+    },
+    "bedrock": {
+        "label": "AWS Bedrock (via gateway)",
+        "dispatchable": False,
+        "hint": "Bedrock signs requests with SigV4 rather than a bearer token, which "
+        "this proxy does not implement. Point base URL at an OpenAI-compatible "
+        "gateway in front of Bedrock and set the kind to OpenAI-compatible.",
+        "default_base_url": "",
+    },
+    "vertex": {
+        "label": "Google Vertex (via gateway)",
+        "dispatchable": False,
+        "hint": "Vertex uses Google service-account auth. Use Gemini's OpenAI "
+        "compatibility endpoint, or a gateway, with the OpenAI-compatible kind.",
+        "default_base_url": "",
+    },
+}
+
+
+class MissingCredential(RuntimeError):
+    """The model names an env var for its key, and it is not set."""
+
+
+@dataclass(frozen=True)
+class UpstreamCall:
+    """A fully-resolved outbound request."""
+
+    url: str
+    path: str
+    headers: dict[str, str]
+    payload: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class UpstreamResult:
+    """Normalised response: the OpenAI-shaped body plus extracted usage."""
+
+    body: dict[str, Any]
+    prompt_tokens: int
+    completion_tokens: int
+    has_usage: bool
+
+
+# --------------------------------------------------------------------- keys
+
+
+def resolve_credential(api_key_env: str | None) -> str | None:
+    """Read a provider key from the environment by variable name."""
+    if not api_key_env:
+        return None
+    value = os.environ.get(api_key_env)
+    return value or None
+
+
+# ------------------------------------------------------------------ openai
+
+
+def _openai_request(model_id: str, payload: dict, key: str | None) -> UpstreamCall:
+    headers = {"Content-Type": "application/json"}
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    return UpstreamCall(
+        url="",
+        path="/chat/completions",
+        headers=headers,
+        payload={**payload, "model": model_id},
+    )
+
+
+def _openai_response(body: dict) -> UpstreamResult:
+    usage = body.get("usage") or {}
+    return UpstreamResult(
+        body=body,
+        prompt_tokens=int(usage.get("prompt_tokens") or 0),
+        completion_tokens=int(usage.get("completion_tokens") or 0),
+        has_usage=bool(usage),
+    )
+
+
+# --------------------------------------------------------------- anthropic
+
+
+def _anthropic_request(model_id: str, payload: dict, key: str | None) -> UpstreamCall:
+    headers = {
+        "Content-Type": "application/json",
+        "anthropic-version": "2023-06-01",
+    }
+    if key:
+        headers["x-api-key"] = key
+
+    # Anthropic takes the system prompt as a top-level field, not as a message
+    # with role "system".
+    system_parts: list[str] = []
+    messages: list[dict] = []
+    for message in payload.get("messages") or []:
+        if message.get("role") == "system":
+            system_parts.append(str(message.get("content", "")))
+        else:
+            messages.append({"role": message.get("role"), "content": message.get("content")})
+
+    translated: dict[str, Any] = {
+        "model": model_id,
+        "messages": messages,
+        # Required by Anthropic, unlike OpenAI where it is optional. The proxy
+        # always has a value here because the reservation is sized against it.
+        "max_tokens": int(payload.get("max_tokens") or 1024),
+    }
+    if system_parts:
+        translated["system"] = "\n\n".join(system_parts)
+    for field in ("temperature", "top_p", "stop_sequences", "metadata"):
+        if field in payload:
+            translated[field] = payload[field]
+
+    return UpstreamCall(url="", path="/messages", headers=headers, payload=translated)
+
+
+def _anthropic_response(body: dict) -> UpstreamResult:
+    usage = body.get("usage") or {}
+    prompt_tokens = int(usage.get("input_tokens") or 0)
+    completion_tokens = int(usage.get("output_tokens") or 0)
+
+    # Re-shape into the OpenAI schema the caller expects. A client pointed at
+    # this proxy must not have to care that its request was answered by a
+    # different provider's API.
+    text = "".join(
+        block.get("text", "")
+        for block in (body.get("content") or [])
+        if isinstance(block, dict) and block.get("type") == "text"
+    )
+    normalised = {
+        "id": body.get("id", ""),
+        "object": "chat.completion",
+        "created": 0,
+        "model": body.get("model", ""),
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": text},
+                "finish_reason": body.get("stop_reason") or "stop",
+            }
+        ],
+        "usage": {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+        },
+    }
+    return UpstreamResult(
+        body=normalised,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        has_usage=bool(usage),
+    )
+
+
+# ------------------------------------------------------------------ facade
+
+_ADAPTERS = {
+    "openai": (_openai_request, _openai_response),
+    "anthropic": (_anthropic_request, _anthropic_response),
+}
+
+
+def build_request(provider_kind: str, model_id: str, payload: dict, key: str | None):
+    builder, _ = _ADAPTERS.get(provider_kind, _ADAPTERS["openai"])
+    return builder(model_id, payload, key)
+
+
+def parse_response(provider_kind: str, body: dict) -> UpstreamResult:
+    _, parser = _ADAPTERS.get(provider_kind, _ADAPTERS["openai"])
+    return parser(body)
+
+
+def is_dispatchable(provider_kind: str) -> bool:
+    return provider_kind in DISPATCHABLE_KINDS
