@@ -203,7 +203,7 @@ terraform validate
 terraform plan
 ```
 
-Read the plan. It should create roughly **22 resources** and no `aws_nat_gateway`,
+Read the plan. It should create roughly **25 resources** and no `aws_nat_gateway`,
 no `aws_lb`, no `aws_db_instance`:
 
 ```bash
@@ -447,6 +447,27 @@ free -h && sudo docker stats --no-stream
 aws ssm send-command --instance-ids $INSTANCE \
   --document-name AWS-RunShellScript \
   --parameters 'commands=["/usr/local/bin/redeploy"]'
+```
+
+### Change the Caddyfile or the compose file
+
+Edit `deploy/Caddyfile` or `deploy/docker-compose.prod.yml`, then:
+
+```bash
+cd terraform && terraform apply
+```
+
+That updates the SSM parameter holding the file. The next deploy — pushed or
+run by hand — writes it to the instance and restarts the affected containers.
+The instance is not replaced or rebooted.
+
+These files used to live inside `user_data`, where they could not be changed at
+all: `user_data` runs once at first boot and never again, so an edit forced a
+stop/start and *still* left the old file in place. If you are working from an
+instance created before that change, install the fetcher once:
+
+```bash
+aws ssm send-command --instance-ids $INSTANCE --document-name AWS-RunShellScript --parameters 'commands=["/usr/local/bin/fetch-files"]'
 ```
 
 ### Back up the database
