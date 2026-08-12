@@ -67,7 +67,7 @@ resource "aws_route_table_association" "public" {
 
 resource "aws_security_group" "instance" {
   name        = "${var.project}-sg"
-  description = "Public HTTP/HTTPS only; no SSH — administration goes via SSM."
+  description = "Public HTTP/HTTPS only; no SSH - administration goes via SSM."
   vpc_id      = aws_vpc.main.id
 
   ingress {

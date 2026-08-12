@@ -17,7 +17,7 @@ resource "aws_iam_openid_connect_provider" "github" {
   url             = "https://token.actions.githubusercontent.com"
   client_id_list  = ["sts.amazonaws.com"]
   # GitHub's OIDC endpoint uses a well-known CA; AWS still requires a thumbprint.
-  thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
+  thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1", "1c58a3a8518e8759bf075b76b750d4f2df264fcd", "1b511abead59c6ce207077c0bf0e0043b1382612"]
 
   tags = local.tags
 }
@@ -39,11 +39,9 @@ resource "aws_iam_role" "github_deploy" {
         StringEquals = {
           "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
         }
-        # Only workflows in this repository, on any branch or tag. Narrow
-        # further to a single branch with:
-        #   "repo:${var.github_repository}:ref:refs/heads/main"
+        # Only workflows in this repository, on any branch or tag.
         StringLike = {
-          "token.actions.githubusercontent.com:sub" = "repo:${var.github_repository}:*"
+          "token.actions.githubusercontent.com:sub" = ["repo:${var.github_repository}:*", "repo:${lower(var.github_repository)}:*"]
         }
       }
     }]
