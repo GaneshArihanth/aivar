@@ -7,11 +7,10 @@ Every step ends with a **check** — run it before moving on. Infrastructure
 failures compound, and finding out at step 9 that step 3 was wrong is the
 expensive way to do this.
 
-> **None of this has been applied against a real AWS account from this
-> machine.** The Terraform, workflows and compose file are written and
-> syntax-checked, but `terraform`, `docker` and the `aws` CLI are not installed
-> here, so nothing was `plan`ned, built or deployed. Treat the first
-> `terraform plan` as the real review, and read it.
+> This stack has been applied against a real AWS account and is running.
+> The figures and resource counts below reflect that deployment. Read your
+> own `terraform plan` before applying — it is the only thing that knows
+> what your account will actually do.
 
 ---
 
@@ -204,7 +203,7 @@ terraform validate
 terraform plan
 ```
 
-Read the plan. It should create roughly **19 resources** and no `aws_nat_gateway`,
+Read the plan. It should create roughly **22 resources** and no `aws_nat_gateway`,
 no `aws_lb`, no `aws_db_instance`:
 
 ```bash

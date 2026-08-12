@@ -39,9 +39,14 @@ resource "aws_iam_role" "github_deploy" {
         StringEquals = {
           "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
         }
-        # Temporarily relax for debugging
+        # Scoped to this repository. Without the `sub` condition — or with a
+        # wildcard like "repo:*" — ANY GitHub repository in the world could
+        # assume this role and run shell commands on the instance via SSM.
+        #
+        # Narrow further to a single branch if you want deploys only from main:
+        #   "repo:${var.github_repository}:ref:refs/heads/main"
         StringLike = {
-          "token.actions.githubusercontent.com:sub" = "repo:*"
+          "token.actions.githubusercontent.com:sub" = "repo:${var.github_repository}:*"
         }
       }
     }]
