@@ -20,7 +20,7 @@ postgres_password = "REPLACE_ME"
 
 # ---------------------------------------------------------------- optional
 
-aws_region    = "us-east-1"
+aws_region    = "ap-south-2"
 project       = "budget-controller"
 instance_type = "t3.micro"
 

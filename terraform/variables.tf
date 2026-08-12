@@ -5,9 +5,15 @@ variable "project" {
 }
 
 variable "aws_region" {
-  description = "Region to deploy into. us-east-1 is usually the cheapest."
+  description = <<-EOT
+    Region to deploy into. us-east-1 is the cheapest; ap-south-2 (Hyderabad)
+    costs about 8% more on compute but is far closer if you are in India.
+    The subnet's AZ is derived from this as "<region>a", so nothing else needs
+    changing — but see DEPLOY.md before moving an existing deployment, because
+    the destroy has to happen before this value changes.
+  EOT
   type        = string
-  default     = "us-east-1"
+  default     = "ap-south-2"
 }
 
 variable "instance_type" {

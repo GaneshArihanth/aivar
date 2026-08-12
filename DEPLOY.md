@@ -259,7 +259,7 @@ AWS credentials, and the trust policy is scoped to your repository specifically.
 
 ```bash
 gh secret set AWS_DEPLOY_ROLE --body "$(terraform output -raw github_actions_role_arn)"
-gh secret set AWS_REGION      --body "us-east-1"
+gh secret set AWS_REGION      --body "ap-south-2"
 ```
 
 Or via the web UI: **Settings → Secrets and variables → Actions → New
@@ -336,6 +336,20 @@ sudo docker compose -f docker-compose.prod.yml exec proxy python -m scripts.seed
 
 This prints twelve API keys **once**. Copy them now — they are stored only as
 HMACs and cannot be recovered; you would have to rotate.
+
+Then restart the proxy:
+
+```bash
+sudo docker compose -f docker-compose.prod.yml restart proxy
+```
+
+This is required, not optional. The proxy keeps an in-process mirror of the
+pricing catalog, loaded at startup and refreshed only when the catalog is
+changed *through the admin API*. `seed.py` writes to the database directly, so a
+proxy that was already running never learns about the models it just inserted —
+and every call fails with `422 model_not_found` and an empty `available_models`
+list, while `/admin/models` cheerfully shows all eleven entries. Restarting
+reloads the mirror.
 
 Open the dashboard at `http://<public_ip>/dashboard`. No login is required.
 
