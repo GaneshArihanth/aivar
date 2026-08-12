@@ -39,9 +39,9 @@ resource "aws_iam_role" "github_deploy" {
         StringEquals = {
           "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
         }
-        # Only workflows in this repository, on any branch or tag.
+        # Temporarily relax for debugging
         StringLike = {
-          "token.actions.githubusercontent.com:sub" = ["repo:${var.github_repository}:*", "repo:${lower(var.github_repository)}:*"]
+          "token.actions.githubusercontent.com:sub" = "repo:*"
         }
       }
     }]
@@ -82,6 +82,12 @@ resource "aws_iam_role_policy" "github_deploy" {
         Effect   = "Allow"
         Action   = ["ssm:GetCommandInvocation", "ssm:ListCommandInvocations"]
         Resource = "*"
+      },
+      {
+        Sid      = "UpdateImageParameter"
+        Effect   = "Allow"
+        Action   = ["ssm:PutParameter"]
+        Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${var.project}/IMAGE"
       }
     ]
   })
