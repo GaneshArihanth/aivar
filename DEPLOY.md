@@ -486,6 +486,29 @@ aws ec2 describe-addresses --query 'Addresses[].PublicIp' --output text   # shou
 **`terraform apply` fails on the OIDC provider already existing.** It is
 account-wide and can only exist once. Set `create_oidc_provider = false`.
 
+**Deploy fails at "Assume the AWS deploy role" with `Not authorized to perform
+sts:AssumeRoleWithWebIdentity`.** The error says nothing about *which*
+condition failed, and the usual cause is the subject pattern. GitHub issues the
+OIDC subject in two shapes:
+
+```
+repo:OWNER/REPO:ref:refs/heads/main
+repo:OWNER@123456/REPO@789012:ref:refs/heads/main
+```
+
+The second is the immutable-identifier form — numeric owner and repo ids
+appended so a rename does not change the subject. Which one your repository
+gets is not under your control, so `terraform/github_oidc.tf` trusts both.
+To see what yours actually presents, read it out of CloudTrail:
+
+```bash
+aws cloudtrail lookup-events --lookup-attributes AttributeKey=EventName,AttributeValue=AssumeRoleWithWebIdentity --max-results 1 --query 'Events[0].CloudTrailEvent' --output text | jq -r '.userIdentity.userName'
+```
+
+That field carries the exact subject the token presented. Do not "fix" this by
+relaxing the pattern to `repo:*` — that lets any repository on GitHub assume
+the role and run shell commands on your instance.
+
 **The deploy workflow cannot find the instance.** The filter is
 `tag:Project = budget-controller`. If you changed `project` in tfvars, change
 `PROJECT` at the top of `.github/workflows/deploy.yml` to match.

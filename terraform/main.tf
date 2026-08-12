@@ -228,6 +228,40 @@ resource "aws_ssm_parameter" "image" {
   }
 }
 
+# The compose file and the Caddyfile, shipped through SSM rather than baked
+# into user_data.
+#
+# user_data runs exactly once, on first boot — cloud-init's scripts-user module
+# is per-instance, so it does not re-run on stop/start. Baking these files in
+# therefore made them unchangeable in practice: editing the Caddyfile changed
+# user_data, which forced a stop/start (AWS requires a stopped instance to
+# modify user_data) costing downtime and a new public IP, and *still* left the
+# old file on disk, because nothing re-ran the script that writes it. The only
+# way to apply a config change was to copy it over by hand.
+#
+# Through SSM instead: `terraform apply` updates the parameter, the next deploy
+# writes it out and restarts. No bounce, no hand-copying. Nested one level
+# under /files/ so the non-recursive get-parameters-by-path in fetch-env keeps
+# ignoring them — they are files, not environment variables.
+resource "aws_ssm_parameter" "files" {
+  for_each = {
+    compose = "${path.module}/../deploy/docker-compose.prod.yml"
+    caddy   = "${path.module}/../deploy/Caddyfile"
+  }
+
+  name = "/${var.project}/files/${each.key}"
+  type = "String"
+  # gzip + base64, because the free Standard tier caps a value at 4 KB and the
+  # compose file is already 3.4 KB — one more service would silently push it
+  # over, and the Advanced tier that lifts the cap is $0.05/parameter/month,
+  # which is a strange thing to start paying on a free-tier deployment.
+  # Compressed it is well under a kilobyte. The cost is that the value is no
+  # longer readable in the SSM console; `redeploy` decodes it on the way out.
+  value     = base64gzip(file(each.value))
+  overwrite = true
+  tags      = local.tags
+}
+
 # ----------------------------------------------------------------- instance
 
 resource "aws_instance" "app" {
@@ -252,15 +286,20 @@ resource "aws_instance" "app" {
     delete_on_termination = true
   }
 
+  # Deliberately only the two values that identify *which* deployment this is.
+  # Everything that changes over the life of the instance — secrets, config,
+  # the compose file, the Caddyfile — comes from SSM at deploy time instead, so
+  # this string stays constant and the instance stops being bounced by ordinary
+  # edits. See aws_ssm_parameter.files for why.
   user_data = templatefile("${path.module}/user_data.sh", {
-    project      = var.project
-    region       = data.aws_region.current.name
-    compose_file = file("${path.module}/../deploy/docker-compose.prod.yml")
-    caddy_file   = file("${path.module}/../deploy/Caddyfile")
+    project = var.project
+    region  = data.aws_region.current.name
   })
 
-  # The user_data will be updated in the launch template, but we won't 
-  # force a replacement so we don't lose the database volume.
+  # Changing user_data on a running instance requires a stop/start, not a
+  # replacement — a replacement would take the database with it, since
+  # PostgreSQL's volume is this instance's root volume. Note that a stop/start
+  # still costs a new public IP unless an Elastic IP or a domain is in play.
   user_data_replace_on_change = false
 
   tags = merge(local.tags, { Name = "${var.project}-app" })

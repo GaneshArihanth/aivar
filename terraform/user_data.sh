@@ -51,14 +51,6 @@ systemctl restart docker
 # ---------------------------------------------------------------- app files
 mkdir -p "$APP_DIR"
 
-cat > "$APP_DIR/docker-compose.prod.yml" <<'EOF'
-${compose_file}
-EOF
-
-cat > "$APP_DIR/Caddyfile" <<'EOF'
-${caddy_file}
-EOF
-
 # Settings the helper scripts need. Written separately so those scripts can use
 # a quoted heredoc — see the note in fetch-env about why that matters.
 cat > /etc/budget-controller.conf <<EOF
@@ -100,13 +92,46 @@ chmod 600 "$APP_DIR/.env"
 SCRIPT
 chmod +x /usr/local/bin/fetch-env
 
-# Redeploy: refresh secrets, pull the current image, restart, migrate.
+# Pulls the compose file and the Caddyfile out of SSM and writes them to disk.
+#
+# These used to be interpolated straight into this script, which meant they were
+# fixed for the life of the instance: user_data runs once per instance and never
+# again, so editing either file changed nothing on a running box no matter how
+# many times you applied. Fetching them at deploy time makes them ordinary
+# configuration.
+#
+# Values are gzipped and base64-encoded to stay inside SSM's free 4 KB tier.
+cat > /usr/local/bin/fetch-files <<'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+. /etc/budget-controller.conf
+
+get() {
+  aws ssm get-parameter \
+    --name "/$PROJECT/files/$1" \
+    --region "$REGION" \
+    --query 'Parameter.Value' --output text \
+  | base64 -d | gzip -d
+}
+
+# Written to temporary files first: a truncated download would otherwise leave
+# a half-written compose file that docker parses and rejects, and the previous
+# good copy would already be gone.
+get compose > "$APP_DIR/docker-compose.prod.yml.tmp"
+get caddy   > "$APP_DIR/Caddyfile.tmp"
+mv "$APP_DIR/docker-compose.prod.yml.tmp" "$APP_DIR/docker-compose.prod.yml"
+mv "$APP_DIR/Caddyfile.tmp" "$APP_DIR/Caddyfile"
+SCRIPT
+chmod +x /usr/local/bin/fetch-files
+
+# Redeploy: refresh config and secrets, pull the current image, restart, migrate.
 cat > /usr/local/bin/redeploy <<'SCRIPT'
 #!/bin/bash
 set -euo pipefail
 . /etc/budget-controller.conf
 cd "$APP_DIR"
 
+/usr/local/bin/fetch-files
 /usr/local/bin/fetch-env
 docker compose -f docker-compose.prod.yml pull
 # --remove-orphans clears containers for services that have been deleted from
@@ -118,6 +143,12 @@ docker compose -f docker-compose.prod.yml exec -T proxy alembic upgrade head
 docker image prune -f
 SCRIPT
 chmod +x /usr/local/bin/redeploy
+
+# Populate the config files now, so the box is in a usable state even if nobody
+# ever runs a deploy — `docker compose up` by hand works straight after boot.
+# Best-effort: a first boot that races IAM propagation should not fail the whole
+# bootstrap, because the next redeploy fetches them anyway.
+/usr/local/bin/fetch-files || echo "fetch-files failed on first boot; redeploy will retry"
 
 # A marker the deploy workflow waits on, so it does not race the bootstrap.
 touch /var/lib/cloud/instance/bootstrap-complete
