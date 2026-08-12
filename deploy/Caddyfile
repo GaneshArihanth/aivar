@@ -1,14 +1,24 @@
 # Edge configuration.
 #
-# The split below is the important part. The dashboard and /admin/* are put
-# behind basic auth; /v1/chat/completions is not.
+# There is no authentication here, by decision: the dashboard and the whole
+# admin API are open to anyone who can reach this address.
 #
-# Why: the app's own ADMIN_TOKEN cannot be used here, because the dashboard's
-# JavaScript has no way to send one — switching it on would lock the operator
-# out of their own UI. Leaving it off on a public address would let anyone
-# freeze the fleet, grant budget or delete agents. Authenticating at the edge
-# protects the dashboard and the admin API with one credential, and leaves the
-# agent endpoint open to agents, which authenticate with their own key.
+# What that means in practice, so it is never a surprise:
+#   · anyone can read every team, agent, budget and event
+#   · anyone can create, edit, pause or delete agents, rotate keys, grant
+#     budget boosts, and freeze or resume all dispatch
+#   · agent API keys are never exposed — only their `sk-agent-xxxxxx` prefix,
+#     and the raw key is returned exactly once at creation
+#
+# Agent traffic on /v1/chat/completions is still authenticated, by the agent's
+# own X-Agent-Key. That is unaffected by anything here.
+#
+# To close it later, put this back inside a `handle` that excludes
+# /v1/chat/completions and /health:
+#
+#     basic_auth {
+#         {$DASHBOARD_USER} {$DASHBOARD_PASSWORD_HASH}
+#     }
 
 {
 	# Only used when SITE_ADDRESS is a real domain; harmless otherwise.
@@ -18,23 +28,10 @@
 {$SITE_ADDRESS} {
 	encode gzip
 
-	# Agents authenticate with X-Agent-Key, so this path stays open. It is the
-	# only one that does.
-	handle /v1/chat/completions {
-		reverse_proxy proxy:8000
-	}
-
-	# Unauthenticated liveness, so a load balancer or uptime check can reach it.
-	handle /health {
-		reverse_proxy proxy:8000
-	}
-
-	# Everything else — dashboard, /admin/*, SSE, status — requires no login.
-	handle {
-		reverse_proxy proxy:8000 {
-			# SSE must not be buffered or the event feed arrives in batches.
-			flush_interval -1
-		}
+	reverse_proxy proxy:8000 {
+		# SSE must not be buffered or the event feed arrives in batches
+		# instead of live.
+		flush_interval -1
 	}
 
 	header {

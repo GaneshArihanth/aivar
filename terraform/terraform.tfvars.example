@@ -11,10 +11,6 @@ github_repository = "your-github-username/aivar"
 # value and pins it to a commit SHA.
 image = "ghcr.io/your-github-username/aivar:latest"
 
-# bcrypt hash guarding the dashboard and /admin/*. Generate with:
-#   docker run --rm caddy:2-alpine caddy hash-password --plaintext 'a-long-password'
-dashboard_password_hash = "$2a$14$REPLACE_ME"
-
 # Set once and never change: it invalidates every issued agent key.
 #   python -c "import secrets; print(secrets.token_hex(32))"
 api_key_pepper = "REPLACE_ME"

@@ -180,14 +180,6 @@ resource "aws_ssm_parameter" "postgres_password" {
   tags  = local.tags
 }
 
-resource "aws_ssm_parameter" "dashboard_password_hash" {
-  name        = "/${var.project}/DASHBOARD_PASSWORD_HASH"
-  description = "bcrypt hash from `caddy hash-password`. Guards the dashboard and /admin/*."
-  type        = "SecureString"
-  value       = var.dashboard_password_hash
-  tags        = local.tags
-}
-
 resource "aws_ssm_parameter" "provider_keys" {
   for_each = {
     OPENAI_API_KEY    = var.openai_api_key
@@ -206,7 +198,6 @@ resource "aws_ssm_parameter" "provider_keys" {
 resource "aws_ssm_parameter" "config" {
   for_each = {
     SITE_ADDRESS   = var.site_address
-    DASHBOARD_USER = var.dashboard_user
     UPSTREAM_MODE  = var.upstream_mode
     ACME_EMAIL     = var.acme_email
   }

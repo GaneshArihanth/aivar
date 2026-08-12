@@ -26,8 +26,6 @@ services:
       # Set SITE_ADDRESS to a domain for automatic HTTPS, or leave it as :80
       # to serve plain HTTP on the instance's public IP.
       SITE_ADDRESS: ${SITE_ADDRESS:-:80}
-      DASHBOARD_USER: ${DASHBOARD_USER:-admin}
-      DASHBOARD_PASSWORD_HASH: ${DASHBOARD_PASSWORD_HASH}
       # Let's Encrypt contact address. Only used when SITE_ADDRESS is a real
       # domain; without it here, a configured address would sit in .env and
       # never reach Caddy.

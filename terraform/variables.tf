@@ -29,8 +29,9 @@ variable "volume_size_gb" {
 variable "allowed_cidrs" {
   description = <<-EOT
     Who may reach ports 80/443. Leave open if agents call in from anywhere;
-    narrow to your office/VPN CIDRs if not. The dashboard is behind basic auth
-    either way, but a narrower range is a smaller surface.
+    narrow to your office/VPN CIDRs if not. There is no authentication in front
+    of the dashboard or the admin API, so this list is the only thing that
+    limits who can reach them.
   EOT
   type        = list(string)
   default     = ["0.0.0.0/0"]
@@ -55,21 +56,6 @@ variable "acme_email" {
   description = "Contact address for Let's Encrypt. Only used with a real domain."
   type        = string
   default     = "admin@example.com"
-}
-
-variable "dashboard_user" {
-  description = "Basic-auth username for the dashboard and /admin/*."
-  type        = string
-  default     = "admin"
-}
-
-variable "dashboard_password_hash" {
-  description = <<-EOT
-    bcrypt hash, from:  docker run --rm caddy:2-alpine caddy hash-password --plaintext 'your-password'
-    Never the password itself.
-  EOT
-  type        = string
-  sensitive   = true
 }
 
 variable "api_key_pepper" {

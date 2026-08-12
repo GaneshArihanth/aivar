@@ -86,7 +86,7 @@ terraform version && aws --version && git --version
 
 ## Step 1 — Get the code into GitHub
 
-This project is not yet a git repository.
+If the project is not yet a git repository:
 
 ```bash
 cd "/Users/ganesharihanth/Personal/IDE Editor/aivar"
@@ -148,7 +148,7 @@ You should see your account id. If this fails, nothing after it will work.
 
 ## Step 3 — Generate the secrets
 
-Three values, generated once.
+Two values, generated once.
 
 ```bash
 # 1. API key pepper — NEVER change this later; it invalidates every agent key.
@@ -156,30 +156,30 @@ python3 -c "import secrets; print('api_key_pepper     =', repr(secrets.token_hex
 
 # 2. PostgreSQL password
 python3 -c "import secrets; print('postgres_password  =', repr(secrets.token_urlsafe(24)))"
-
-# 3. Dashboard password → bcrypt hash. Pick a real password first.
-docker run --rm caddy:2-alpine caddy hash-password --plaintext 'your-strong-password'
 ```
 
-No Docker locally? Generate the bcrypt hash in Python:
+### There is no authentication in front of the dashboard
 
-```bash
-.venv/bin/pip install bcrypt -q
-.venv/bin/python -c "import bcrypt; print(bcrypt.hashpw(b'your-strong-password', bcrypt.gensalt(rounds=14)).decode())"
-```
+By decision, the dashboard and the whole admin API are open to anyone who can
+reach the address. Be clear-eyed about what that means:
 
-### Why a dashboard password at all
+- anyone can read every team, agent, budget and event;
+- anyone can create, edit, pause or delete agents, rotate keys, grant budget
+  boosts, and freeze or resume all dispatch;
+- agent API keys are *not* exposed — only their `sk-agent-xxxxxx` prefix. The
+  raw key is returned exactly once, at creation.
 
-The app's own `ADMIN_TOKEN` cannot be used here: the dashboard's JavaScript
-never sends one, so switching it on would lock you out of your own UI. Leaving
-it off on a public address would let **anyone freeze the fleet, grant budget or
-delete agents** — `/admin/*` is unauthenticated by design for local use.
+Agent traffic on `/v1/chat/completions` is still authenticated by the agent's
+own `X-Agent-Key`; that is independent of the above.
 
-So authentication happens at the edge. Caddy puts basic auth in front of the
-dashboard and `/admin/*`, and leaves two paths open:
+If you want to limit exposure without adding a login, set `allowed_cidrs` in
+`terraform.tfvars` to your own address — that is the only control currently
+restricting who can reach the admin API.
 
-- `/v1/chat/completions` — agents authenticate with their own `X-Agent-Key`.
-- `/health` — so the deploy workflow can verify without credentials.
+To add a login later, uncomment the `basic_auth` block in `deploy/Caddyfile`
+and re-add the `DASHBOARD_USER` / `DASHBOARD_PASSWORD_HASH` parameters. Note
+that the app's own `ADMIN_TOKEN` cannot serve this purpose: the dashboard's
+JavaScript never sends one, so enabling it would lock you out of your own UI.
 
 ---
 
@@ -190,7 +190,7 @@ cd terraform
 cp terraform.tfvars.example terraform.tfvars
 ```
 
-Edit `terraform.tfvars` with the three secrets, your `github_repository`
+Edit `terraform.tfvars` with the two secrets, your `github_repository`
 (`owner/repo`) and your `image` (`ghcr.io/owner/repo:latest`, lowercase).
 
 Leave `site_address = ":80"` for now — HTTPS needs a domain pointing at an IP
@@ -338,8 +338,7 @@ sudo docker compose -f docker-compose.prod.yml exec proxy python -m scripts.seed
 This prints twelve API keys **once**. Copy them now — they are stored only as
 HMACs and cannot be recovered; you would have to rotate.
 
-Open the dashboard at `http://<public_ip>/dashboard` and log in with the
-username and password from step 3.
+Open the dashboard at `http://<public_ip>/dashboard`. No login is required.
 
 **Check** — point an agent at it:
 
@@ -512,9 +511,6 @@ every key.
 **`docker pull` fails with `denied`.** The ghcr.io package is private. Make it
 public, or add a registry login to `redeploy`.
 
-**The dashboard asks for a password on every page load.** Expected — it is HTTP
-basic auth. The browser will remember it for the session.
-
 ---
 
 ## Security notes
@@ -527,8 +523,9 @@ basic auth. The browser will remember it for the session.
   IAM role scoped to `/<project>/*`. They are **also in `terraform.tfstate` in
   plaintext** — keep state private, and use the S3 backend in `versions.tf` if
   more than one person runs `apply`.
-- **The dashboard is behind basic auth**, which is only as private as your
-  transport. Use a domain and HTTPS for anything real.
+- **The dashboard and admin API are unauthenticated by decision.** `allowed_cidrs`
+  is the only thing limiting who can reach them; narrow it if the instance does
+  not need to be world-reachable.
 - **Redis and PostgreSQL are not published to the host** — they are reachable
   only inside the compose network.
 - The bundled **mock provider is deployed too**. Harmless, but it is an open

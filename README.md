@@ -452,8 +452,8 @@ that window is where requests slip through.
 
 ## API reference
 
-40 endpoints. `/admin/*` is unauthenticated by default; set `ADMIN_TOKEN` to
-require a bearer token.
+40 endpoints. `/admin/*` is unauthenticated — see the security note under
+[Known limitations](#known-limitations).
 
 ### Proxy
 
@@ -923,9 +923,12 @@ plane should not need, or a bundler. Static assets are served with
   rather than a bearer token. Route them through an OpenAI-compatible gateway.
 - **Token estimation is heuristic** (~4 chars/token) unless `TOKENIZER=tiktoken`.
   Under-estimation is safe because settle corrects against reported usage.
-- **`/admin/*` is unauthenticated by default** so the dashboard works out of the
-  box. This includes the freeze switch, boosts and rate limits — set
-  `ADMIN_TOKEN` for anything beyond a local demo.
+- **`/admin/*` is unauthenticated**, by decision, including the freeze switch,
+  budget boosts and rate limits. Anyone who can reach the address can read the
+  whole fleet and change it. Agent keys are never exposed — only their prefix —
+  and `/v1/chat/completions` still requires a valid `X-Agent-Key`.
+  `ADMIN_TOKEN` exists but is deliberately unset: the dashboard's JavaScript
+  never sends it, so enabling it locks the UI out. Restrict by network instead.
 - **Rate limits allow a 2× burst across a minute boundary** (fixed window, as
   above).
 - **`move_agent.lua` spans two hash tags**, so it is atomic on standalone Redis
