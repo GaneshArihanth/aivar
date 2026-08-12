@@ -69,10 +69,13 @@ resource "aws_iam_role_policy" "github_deploy" {
         Sid      = "RunTheRedeployDocument"
         Effect   = "Allow"
         Action   = ["ssm:SendCommand"]
-        Resource = [
-          "arn:aws:ssm:${var.aws_region}::document/AWS-RunShellScript",
-          "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:instance/*"
-        ]
+        Resource = "arn:aws:ssm:${var.aws_region}::document/AWS-RunShellScript"
+      },
+      {
+        Sid      = "RunTheRedeployInstance"
+        Effect   = "Allow"
+        Action   = ["ssm:SendCommand"]
+        Resource = "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:instance/*"
         Condition = {
           StringEquals = { "ssm:resourceTag/Project" = var.project }
         }

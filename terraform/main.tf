@@ -135,7 +135,10 @@ resource "aws_iam_role_policy" "read_secrets" {
       {
         Effect   = "Allow"
         Action   = ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParametersByPath"]
-        Resource = "arn:aws:ssm:${data.aws_region.current.name}:*:parameter/${var.project}/*"
+        Resource = [
+          "arn:aws:ssm:${data.aws_region.current.name}:*:parameter/${var.project}",
+          "arn:aws:ssm:${data.aws_region.current.name}:*:parameter/${var.project}/*"
+        ]
       },
       {
         Effect   = "Allow"
@@ -259,8 +262,10 @@ resource "aws_instance" "app" {
   }
 
   user_data = templatefile("${path.module}/user_data.sh", {
-    project = var.project
-    region  = data.aws_region.current.name
+    project      = var.project
+    region       = data.aws_region.current.name
+    compose_file = file("${path.module}/../deploy/docker-compose.prod.yml")
+    caddy_file   = file("${path.module}/../deploy/Caddyfile")
   })
 
   # Replacing the instance when user_data changes keeps the box reproducible

@@ -51,6 +51,14 @@ systemctl restart docker
 # ---------------------------------------------------------------- app files
 mkdir -p "$APP_DIR"
 
+cat > "$APP_DIR/docker-compose.prod.yml" <<'EOF'
+${compose_file}
+EOF
+
+cat > "$APP_DIR/Caddyfile" <<'EOF'
+${caddy_file}
+EOF
+
 # Pulls every parameter for this project out of SSM and writes the .env that
 # docker compose reads. Kept as a script so a redeploy can refresh secrets
 # without replacing the instance.
