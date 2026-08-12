@@ -39,14 +39,30 @@ resource "aws_iam_role" "github_deploy" {
         StringEquals = {
           "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
         }
-        # Scoped to this repository. Without the `sub` condition — or with a
-        # wildcard like "repo:*" — ANY GitHub repository in the world could
-        # assume this role and run shell commands on the instance via SSM.
+        # Scoped to this repository. Without a `sub` condition — or with a bare
+        # "repo:*" — ANY GitHub repository in the world could assume this role
+        # and run shell commands on the instance via SSM.
         #
-        # Narrow further to a single branch if you want deploys only from main:
-        #   "repo:${var.github_repository}:ref:refs/heads/main"
+        # Two patterns, because GitHub issues the subject in two shapes and
+        # which one you get is not under your control:
+        #
+        #   classic  repo:OWNER/REPO:ref:refs/heads/main
+        #   with ids repo:OWNER@123456/REPO@789012:ref:refs/heads/main
+        #
+        # The second is GitHub's immutable-identifier form: the numeric owner
+        # and repository ids are appended so that renaming either does not
+        # change the subject. It is what this repository actually presents, and
+        # it is why the conventional `repo:OWNER/REPO:*` pattern silently fails
+        # with "Not authorized to perform sts:AssumeRoleWithWebIdentity" —
+        # the pattern simply never matches.
+        #
+        # StringLike with a list matches if ANY entry matches, so both shapes
+        # work and the role keeps functioning if GitHub changes which it sends.
         StringLike = {
-          "token.actions.githubusercontent.com:sub" = "repo:${var.github_repository}:*"
+          "token.actions.githubusercontent.com:sub" = [
+            "repo:${var.github_repository}:*",
+            "repo:${split("/", var.github_repository)[0]}@*/${split("/", var.github_repository)[1]}@*:*",
+          ]
         }
       }
     }]
