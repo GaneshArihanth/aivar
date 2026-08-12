@@ -268,9 +268,9 @@ resource "aws_instance" "app" {
     caddy_file   = file("${path.module}/../deploy/Caddyfile")
   })
 
-  # Replacing the instance when user_data changes keeps the box reproducible
-  # rather than accumulating hand edits.
-  user_data_replace_on_change = true
+  # The user_data will be updated in the launch template, but we won't 
+  # force a replacement so we don't lose the database volume.
+  user_data_replace_on_change = false
 
   tags = merge(local.tags, { Name = "${var.project}-app" })
 }

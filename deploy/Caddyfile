@@ -29,11 +29,8 @@
 		reverse_proxy proxy:8000
 	}
 
-	# Everything else — dashboard, /admin/*, SSE, status — requires a login.
+	# Everything else — dashboard, /admin/*, SSE, status — requires no login.
 	handle {
-		basic_auth {
-			{$DASHBOARD_USER} {$DASHBOARD_PASSWORD_HASH}
-		}
 		reverse_proxy proxy:8000 {
 			# SSE must not be buffered or the event feed arrives in batches.
 			flush_interval -1
