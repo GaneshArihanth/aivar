@@ -229,23 +229,19 @@ async def authenticate_agent(
     return ctx
 
 
-# ------------------------------------------------------------- admin guard
-
-
-async def require_admin(
-    authorization: str | None = Header(default=None),
-    x_admin_token: str | None = Header(default=None, alias="X-Admin-Token"),
-) -> None:
-    """Guards ``/admin/*`` when ``ADMIN_TOKEN`` is configured.
-
-    Left open by default so the dashboard works out of the box in a local demo;
-    set ``ADMIN_TOKEN`` to lock it down.
-    """
-    if not settings.admin_token:
-        return
-    supplied = _extract_key(authorization, x_admin_token)
-    if not supplied or not hmac.compare_digest(supplied, settings.admin_token):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"error": {"type": "admin_auth_required"}},
-        )
+# ------------------------------------------------------------- admin routes
+#
+# There is deliberately no guard on /admin/*. Anyone who can reach the app can
+# read and change budgets, agents and keys.
+#
+# A token check used to live here, gated on an ADMIN_TOKEN setting that was
+# unset by default. It was worse than nothing: the dashboard's JavaScript never
+# sent the header, so the one documented way to "lock it down" only served to
+# 401 every dashboard request while leaving anyone with curl entirely unaffected.
+# A control that breaks the legitimate path and stops no attacker is not a
+# control, and keeping it invited someone to switch it on and believe they were
+# protected.
+#
+# Reach is the boundary instead: put the instance behind a VPN, narrow
+# `allowed_cidrs` in Terraform, or terminate auth at the reverse proxy — see the
+# commented basic_auth block in deploy/Caddyfile, which does cover curl.

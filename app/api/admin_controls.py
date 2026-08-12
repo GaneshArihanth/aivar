@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.errors import http_error
-from app.core import events, security
+from app.core import events
 from app.core.money import format_usd, micros_to_float, usd_to_micros
 from app.db.models import BudgetGrant, Team
 from app.db.repositories import agents as agent_repo
@@ -27,11 +27,7 @@ from app.redisx.client import gateway
 
 log = structlog.get_logger(__name__)
 
-router = APIRouter(
-    prefix="/admin",
-    tags=["admin:controls"],
-    dependencies=[Depends(security.require_admin)],
-)
+router = APIRouter(prefix="/admin", tags=["admin:controls"])
 
 
 class FreezeRequest(BaseModel):

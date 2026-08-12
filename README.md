@@ -751,7 +751,6 @@ Everything is environment-driven; see `.env.example`.
 | `UPSTREAM_MODE` | `mock` | `live` uses each model's own endpoint |
 | `UPSTREAM_TIMEOUT_SECONDS` | `30.0` | |
 | `API_KEY_PEPPER` | random per process | **Set this** — otherwise every key breaks on restart |
-| `ADMIN_TOKEN` | unset | Bearer token guarding `/admin/*` |
 | `ENFORCEMENT_FAIL_MODE` | `closed` | Reject when Redis is unreachable |
 | `DEFAULT_WARN_THRESHOLD` | `0.80` | |
 | `DEFAULT_SUBSTITUTION_THRESHOLD` | `0.90` | |
@@ -927,8 +926,8 @@ plane should not need, or a bundler. Static assets are served with
   budget boosts and rate limits. Anyone who can reach the address can read the
   whole fleet and change it. Agent keys are never exposed — only their prefix —
   and `/v1/chat/completions` still requires a valid `X-Agent-Key`.
-  `ADMIN_TOKEN` exists but is deliberately unset: the dashboard's JavaScript
-  never sends it, so enabling it locks the UI out. Restrict by network instead.
+  There is no application-level switch to turn this on — restrict by network
+  instead (`allowed_cidrs`, a VPN, or auth at the reverse proxy).
 - **Rate limits allow a 2× burst across a minute boundary** (fixed window, as
   above).
 - **`move_agent.lua` spans two hash tags**, so it is atomic on standalone Redis

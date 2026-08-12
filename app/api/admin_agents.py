@@ -31,11 +31,7 @@ from app.redisx.client import gateway
 
 log = structlog.get_logger(__name__)
 
-router = APIRouter(
-    prefix="/admin/agents",
-    tags=["admin:agents"],
-    dependencies=[Depends(security.require_admin)],
-)
+router = APIRouter(prefix="/admin/agents", tags=["admin:agents"])
 
 
 # --------------------------------------------------------------- serialisation

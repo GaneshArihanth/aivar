@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api import schemas
 from app.api.errors import http_error
 from app.config import settings
-from app.core import providers, security, upstream
+from app.core import providers, upstream
 from app.core.money import MICROS_PER_USD, usd_to_micros
 from app.core.pricing import pricing
 from app.db.models import Agent, ModelCatalog, Policy
@@ -29,11 +29,7 @@ from app.db.session import get_session, session_scope
 
 log = structlog.get_logger(__name__)
 
-router = APIRouter(
-    prefix="/admin/models",
-    tags=["admin:models"],
-    dependencies=[Depends(security.require_admin)],
-)
+router = APIRouter(prefix="/admin/models", tags=["admin:models"])
 
 
 def _to_out(row: ModelCatalog) -> schemas.ModelOut:

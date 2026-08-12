@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import schemas
 from app.api.errors import http_error
-from app.core import security
 from app.core.money import MICROS_PER_USD, micros_to_float, usd_to_micros
 from app.db.models import Agent, Budget, Team
 from app.db.repositories import agents as agent_repo
@@ -21,9 +20,7 @@ from app.db.session import get_session
 from app.redisx import keys
 from app.redisx.client import gateway
 
-router = APIRouter(
-    prefix="/admin", tags=["admin:config"], dependencies=[Depends(security.require_admin)]
-)
+router = APIRouter(prefix="/admin", tags=["admin:config"])
 
 
 class TeamCreateRequest(BaseModel):

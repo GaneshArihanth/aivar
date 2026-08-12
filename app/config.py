@@ -63,7 +63,6 @@ class Settings(BaseSettings):
     # per-process value is generated otherwise, which invalidates existing keys
     # on restart — loud by design rather than silently insecure.
     api_key_pepper: str = Field(default_factory=lambda: secrets.token_hex(32))
-    admin_token: str | None = None  # optional bearer token for /admin/*
 
     # ----------------------------------------------------------- enforcement
     # "closed": reject when Redis is unreachable. The absence of enforcement is

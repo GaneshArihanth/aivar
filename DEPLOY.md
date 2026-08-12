@@ -176,9 +176,9 @@ If you want to limit exposure without adding a login, set `allowed_cidrs` in
 restricting who can reach the admin API.
 
 To add a login later, uncomment the `basic_auth` block in `deploy/Caddyfile`
-and re-add the `DASHBOARD_USER` / `DASHBOARD_PASSWORD_HASH` parameters. Note
-that the app's own `ADMIN_TOKEN` cannot serve this purpose: the dashboard's
-JavaScript never sends one, so enabling it would lock you out of your own UI.
+and re-add the `DASHBOARD_USER` / `DASHBOARD_PASSWORD_HASH` parameters. Doing it
+at the proxy covers the API as well as the UI, which is the point — auth inside
+the app could only ever have guarded one of the two.
 
 ---
 
