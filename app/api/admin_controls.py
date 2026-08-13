@@ -17,9 +17,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.errors import http_error
-from app.core import events
+from app.config import settings
+from app.core import events, providers
 from app.core.money import format_usd, micros_to_float, usd_to_micros
-from app.db.models import BudgetGrant, Team
+from app.db.models import BudgetGrant, ModelCatalog, Team
 from app.db.repositories import agents as agent_repo
 from app.db.session import get_session
 from app.redisx import keys
@@ -352,3 +353,49 @@ async def revoke_boost(
     )
     await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# --------------------------------------------------------------- demo config
+
+
+@router.get("/demo/config")
+async def demo_config(session: AsyncSession = Depends(get_session)) -> dict:
+    """What the Demo page needs to know before it offers to spend money.
+
+    The page asks rather than assumes, so it can say "GEMINI_API_KEY is not
+    set" up front instead of letting the operator compose a prompt, press send,
+    and discover the misconfiguration in an error body.
+    """
+    rows = list(
+        (
+            await session.execute(
+                select(ModelCatalog).where(ModelCatalog.is_active.is_(True))
+            )
+        ).scalars()
+    )
+
+    providers_ready: dict[str, bool] = {}
+    for row in rows:
+        if row.api_key_env:
+            providers_ready[row.api_key_env] = bool(
+                providers.resolve_credential(row.api_key_env)
+            )
+
+    return {
+        "live_allowed": settings.demo_allow_live,
+        "upstream_mode": settings.upstream_mode,
+        # Only these can actually be dispatched to; the rest are catalogued for
+        # pricing but need auth this proxy does not implement (SigV4, Google IAM).
+        "dispatchable_models": [
+            {
+                "model_id": row.model_id,
+                "provider": row.provider,
+                "api_key_env": row.api_key_env,
+                "ready": not row.api_key_env
+                or bool(providers.resolve_credential(row.api_key_env)),
+            }
+            for row in rows
+            if providers.is_dispatchable(row.provider_kind) and row.base_url
+        ],
+        "providers_ready": providers_ready,
+    }

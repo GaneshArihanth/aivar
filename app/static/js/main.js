@@ -8,6 +8,7 @@ import { $ } from "./util.js";
 import { agentDetailView } from "./views/agent-detail.js";
 import { agentsView } from "./views/agents.js";
 import { dashboardView } from "./views/dashboard.js";
+import { demoView } from "./views/demo.js";
 import { modelsView } from "./views/models.js";
 import { teamsView } from "./views/teams.js";
 
@@ -16,6 +17,7 @@ route("/agents", agentsView);
 route("/agents/:id", agentDetailView);
 route("/teams", teamsView);
 route("/models", modelsView);
+route("/demo", demoView);
 
 function renderHeader() {
   const period = $("#period");

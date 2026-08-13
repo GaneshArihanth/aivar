@@ -32,6 +32,8 @@ from typing import Any
 
 import structlog
 
+from app.config import settings
+
 log = structlog.get_logger(__name__)
 
 # Wire formats this proxy can actually dispatch.
@@ -99,11 +101,23 @@ class UpstreamResult:
 
 
 def resolve_credential(api_key_env: str | None) -> str | None:
-    """Read a provider key from the environment by variable name."""
+    """Resolve a provider key from the variable name recorded in the catalog.
+
+    Checks the process environment first, then settings. The second lookup is
+    not redundant: pydantic-settings loads .env into the Settings object and
+    never into os.environ, so an environment-only lookup finds keys under
+    Docker — where compose injects .env as real environment variables — and
+    misses them under `make dev`. The failure that produced was a
+    "'GEMINI_API_KEY' is not set" error pointing at a variable sitting in plain
+    sight in the operator's .env file.
+    """
     if not api_key_env:
         return None
     value = os.environ.get(api_key_env)
-    return value or None
+    if value:
+        return value
+    # Same name, lowercased, is the settings field: GEMINI_API_KEY -> gemini_api_key.
+    return getattr(settings, api_key_env.lower(), None) or None
 
 
 # ------------------------------------------------------------------ openai

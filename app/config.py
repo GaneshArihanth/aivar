@@ -58,6 +58,28 @@ class Settings(BaseSettings):
     # spending real money because an unrelated OPENAI_API_KEY was exported.
     upstream_mode: Literal["mock", "live"] = "mock"
 
+    # Provider credentials.
+    #
+    # These exist as settings, rather than being read straight from os.environ,
+    # because pydantic-settings loads .env into *this object* and never into the
+    # process environment. Without them, a key written to .env resolves fine in
+    # Docker — where compose injects it as a real environment variable — and
+    # silently resolves to nothing under `make dev`, producing an
+    # "environment variable not set" error naming a variable the operator can
+    # plainly see in their .env. See providers.resolve_credential.
+    openai_api_key: str = ""
+    anthropic_api_key: str = ""
+    gemini_api_key: str = ""
+
+    # Lets the Demo page dispatch a single request to a model's real endpoint
+    # while everything else keeps using the mock. Without this the only way to
+    # reach a real provider is upstream_mode="live", which sends *all* traffic
+    # there — including load tests.
+    #
+    # Note this is reachable by anyone who can reach the dashboard, which has no
+    # authentication: a stranger can spend against your provider quota.
+    demo_allow_live: bool = True
+
     # -------------------------------------------------------------- security
     # HMAC pepper for API-key hashing. MUST be set in production; a random
     # per-process value is generated otherwise, which invalidates existing keys

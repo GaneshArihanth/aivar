@@ -119,14 +119,23 @@ def resolve_route(
     return model.base_url, model.provider_kind, credential
 
 
-async def chat_completion(model: ModelPrice, payload: dict) -> providers.UpstreamResult:
+async def chat_completion(
+    model: ModelPrice, payload: dict, *, force_model_endpoint: bool = False
+) -> providers.UpstreamResult:
     """Dispatch one completion and return a normalised result.
 
     Raises :class:`UpstreamTimeout`, :class:`UpstreamError` or
     :class:`UpstreamNotConfigured` — each of which the caller must turn into a
     released hold, so a provider problem never consumes budget.
+
+    ``force_model_endpoint`` sends this one call to the model's own endpoint
+    even in mock mode, so the Demo page can exercise a real provider without
+    switching the whole system to ``upstream_mode="live"`` and putting every
+    load test on a metered connection.
     """
-    base_url, kind, credential = resolve_route(model)
+    base_url, kind, credential = resolve_route(
+        model, force_model_endpoint=force_model_endpoint
+    )
     call = providers.build_request(kind, model.model_id, payload, credential)
 
     try:

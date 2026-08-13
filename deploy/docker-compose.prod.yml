@@ -48,10 +48,15 @@ services:
       API_KEY_PEPPER: ${API_KEY_PEPPER}
       ENFORCEMENT_FAIL_MODE: closed
       LOG_JSON: "true"
-      # Real provider keys, only consulted when UPSTREAM_MODE=live.
+      # Real provider keys. Consulted when UPSTREAM_MODE=live, and by the Demo
+      # page's per-request live dispatch even while the rest stays on the mock.
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      # Declared so the kill switch is actually reachable in production: an SSM
+      # parameter only reaches the app if compose forwards it. Defaults to the
+      # application default (on) when unset.
+      DEMO_ALLOW_LIVE: ${DEMO_ALLOW_LIVE:-true}
     depends_on:
       postgres:
         condition: service_healthy

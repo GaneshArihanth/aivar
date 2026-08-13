@@ -24,6 +24,7 @@ from fastapi import APIRouter, Depends, Request, Response, status
 from fastapi.responses import JSONResponse
 
 from app.api.errors import error_body
+from app.config import settings
 from app.core import budget, events, policy, runaway, upstream
 from app.core.budget import Decision
 from app.core.money import format_usd, format_usd_precise, micros_to_float
@@ -199,6 +200,22 @@ async def chat_completions(
     requested_model = body.get("model") or agent.preferred_model
     messages = body.get("messages") or []
 
+    # Opt-in to dispatching this one call to the model's real endpoint while the
+    # rest of the system stays on the mock. The Demo page uses it to prove the
+    # ledger against real provider token counts.
+    #
+    # Gated on a server-side setting so the decision to spend real money is the
+    # operator's, not the caller's. When mock mode is off the flag is moot —
+    # everything is already going to real endpoints.
+    live_dispatch = bool(
+        settings.demo_allow_live
+        and (
+            request.headers.get("X-Budget-Live-Dispatch", "").lower()
+            in ("1", "true", "yes")
+            or body.get("live_dispatch") is True
+        )
+    )
+
     # max_tokens is the output ceiling the whole reservation is sized against.
     # Absent, it defaults. Present but unusable (zero, negative, unparseable)
     # it is a client error, refused here: reserving against a fiction would
@@ -337,10 +354,14 @@ async def chat_completions(
     # ------------------------------------------------------------- dispatch
     upstream_payload = {**body, "model": served_model}
     upstream_payload.pop("session_id", None)
+    # Ours, not the provider's — it would be rejected as an unknown field.
+    upstream_payload.pop("live_dispatch", None)
 
     served_price = pricing.require(served_model)
     try:
-        result = await upstream.chat_completion(served_price, upstream_payload)
+        result = await upstream.chat_completion(
+            served_price, upstream_payload, force_model_endpoint=live_dispatch
+        )
     except (
         upstream.UpstreamTimeout,
         upstream.UpstreamError,
