@@ -132,3 +132,47 @@ def test_demo_allow_live_defaults_to_enabled():
 def test_demo_allow_live_can_be_switched_off():
     """The kill switch has to work, since it is the only brake on real spend."""
     assert Settings(_env_file=None, demo_allow_live=False).demo_allow_live is False
+
+
+# ------------------------------------------------- api_key_env is a NAME
+
+
+def test_pasting_a_provider_key_into_api_key_env_is_refused():
+    """The field names a variable; the key itself belongs in .env.
+
+    Accepting the key here fails twice: the lookup is for a variable nobody
+    set, so the model is undispatchable and reports "unset", and the secret is
+    rendered in the models table of an unauthenticated dashboard.
+    """
+    from app.api.schemas import ModelCreateRequest, ModelUpdateRequest
+
+    pasted_key = "example.key.value.not-a-real-credential"
+
+    with pytest.raises(ValueError, match="NAME of an environment variable"):
+        ModelUpdateRequest(api_key_env=pasted_key)
+
+    with pytest.raises(ValueError, match="NAME of an environment variable"):
+        ModelCreateRequest(
+            model_id="x",
+            provider="google",
+            input_usd_per_1k=0,
+            output_usd_per_1k=0,
+            api_key_env=pasted_key,
+        )
+
+
+@pytest.mark.parametrize(
+    "value", ["GEMINI_API_KEY", "OPENAI_API_KEY", "my_local_key", "_LEADING"]
+)
+def test_real_variable_names_are_accepted(value):
+    from app.api.schemas import ModelUpdateRequest
+
+    assert ModelUpdateRequest(api_key_env=value).api_key_env == value
+
+
+@pytest.mark.parametrize("value", [None, "", "   "])
+def test_blank_means_no_credential_needed(value):
+    """A local Ollama box needs no key, and must stay configurable that way."""
+    from app.api.schemas import ModelUpdateRequest
+
+    assert ModelUpdateRequest(api_key_env=value).api_key_env is None

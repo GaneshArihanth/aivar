@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from decimal import Decimal
 
@@ -67,6 +68,34 @@ class ModelCreateRequest(BaseModel):
             raise ValueError("Cannot be blank")
         return stripped
 
+    @field_validator("api_key_env")
+    @classmethod
+    def _looks_like_a_variable_name(cls, v: str | None) -> str | None:
+        """Reject a secret pasted where a variable *name* belongs.
+
+        This field holds the name of an environment variable — GEMINI_API_KEY —
+        and the catalog renders it in the models table. Pasting the key itself
+        fails twice over: the lookup is for a variable nobody has ever set, so
+        the model reports "unset" and cannot be dispatched, and the secret is
+        put on screen for anyone who can open the dashboard, which has no
+        authentication in front of it.
+
+        Environment variable names are conventionally upper snake case, which
+        no provider key resembles, so the check is cheap and unambiguous.
+        """
+        if v is None:
+            return None
+        stripped = v.strip()
+        if not stripped:
+            return None
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", stripped):
+            raise ValueError(
+                "api_key_env is the NAME of an environment variable, such as "
+                "GEMINI_API_KEY — not the key itself. Put the key in .env (or "
+                "SSM in production) under that name."
+            )
+        return stripped
+
     @field_validator("provider_kind")
     @classmethod
     def _known_kind(cls, v: str) -> str:
@@ -91,6 +120,34 @@ class ModelUpdateRequest(BaseModel):
     context_window: int | None = Field(default=None, ge=1)
     notes: str | None = None
     is_active: bool | None = None
+
+    @field_validator("api_key_env")
+    @classmethod
+    def _looks_like_a_variable_name(cls, v: str | None) -> str | None:
+        """Reject a secret pasted where a variable *name* belongs.
+
+        This field holds the name of an environment variable — GEMINI_API_KEY —
+        and the catalog renders it in the models table. Pasting the key itself
+        fails twice over: the lookup is for a variable nobody has ever set, so
+        the model reports "unset" and cannot be dispatched, and the secret is
+        put on screen for anyone who can open the dashboard, which has no
+        authentication in front of it.
+
+        Environment variable names are conventionally upper snake case, which
+        no provider key resembles, so the check is cheap and unambiguous.
+        """
+        if v is None:
+            return None
+        stripped = v.strip()
+        if not stripped:
+            return None
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", stripped):
+            raise ValueError(
+                "api_key_env is the NAME of an environment variable, such as "
+                "GEMINI_API_KEY — not the key itself. Put the key in .env (or "
+                "SSM in production) under that name."
+            )
+        return stripped
 
     @field_validator("provider_kind")
     @classmethod

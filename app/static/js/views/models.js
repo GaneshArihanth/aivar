@@ -25,11 +25,22 @@ function credentialCell(model) {
   if (!model.api_key_env) {
     return '<span class="muted">none needed</span>';
   }
+  // Anything that is not a plain variable name is almost certainly a key that
+  // was pasted into this field before the server started rejecting them. Show
+  // it masked: the form promises this app never displays secrets, and a row
+  // written before that check existed must not break the promise on a
+  // dashboard that has no authentication in front of it.
+  const name = model.api_key_env;
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+    return `<span class="pill pill--warn"
+                  title="This looks like a key, not a variable name. Replace it with the name of the variable holding the key, e.g. GEMINI_API_KEY, and rotate the exposed key.">
+              ${esc(name.slice(0, 4))}… — looks like a pasted key</span>`;
+  }
   return model.credential_present
-    ? `<span class="pill pill--ok" title="${esc(model.api_key_env)} is set">
-         ${esc(model.api_key_env)} ✓</span>`
-    : `<span class="pill pill--warn" title="${esc(model.api_key_env)} is not set in the environment">
-         ${esc(model.api_key_env)} — unset</span>`;
+    ? `<span class="pill pill--ok" title="${esc(name)} is set">
+         ${esc(name)} ✓</span>`
+    : `<span class="pill pill--warn" title="${esc(name)} is not set in the environment">
+         ${esc(name)} — unset</span>`;
 }
 
 function rowMarkup(model) {
