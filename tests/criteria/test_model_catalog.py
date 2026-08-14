@@ -162,7 +162,7 @@ async def test_seeded_catalog_carries_real_endpoints(api):
     assert models["claude-sonnet-4"]["provider_kind"] == "anthropic"
     # Gemini is reached through its OpenAI-compatibility endpoint, so it needs
     # no adapter of its own.
-    assert models["gemini-2.0-flash"]["provider_kind"] == "openai"
-    assert "generativelanguage" in models["gemini-2.0-flash"]["base_url"]
+    assert models["gemini-3.5-flash"]["provider_kind"] == "openai"
+    assert "generativelanguage" in models["gemini-3.5-flash"]["base_url"]
     # A local runtime, free at the point of use.
     assert models["llama3.1:8b"]["input_usd_per_1k"] == 0

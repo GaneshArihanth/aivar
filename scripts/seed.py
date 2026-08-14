@@ -59,9 +59,12 @@ MODELS = [
     ("claude-haiku-4-5", "anthropic", "Claude Haiku 4.5", 800, 4_000, 15,
      "anthropic", ANTHROPIC_URL, "ANTHROPIC_API_KEY", 200_000),
 
-    ("gemini-2.0-flash", "google", "Gemini 2.0 Flash", 100, 400, 15,
+    # The 2.0 generation was retired by Google: its endpoint answers 404 with
+    # "no longer available", so seeding it produced a catalog entry that priced
+    # and routed correctly and could never actually be called.
+    ("gemini-3.5-flash", "google", "Gemini 3.5 Flash", 300, 2_500, 20,
      "openai", GEMINI_URL, "GEMINI_API_KEY", 1_048_576),
-    ("gemini-2.0-flash-lite", "google", "Gemini 2.0 Flash-Lite", 75, 300, 5,
+    ("gemini-3.5-flash-lite", "google", "Gemini 3.5 Flash-Lite", 100, 400, 5,
      "openai", GEMINI_URL, "GEMINI_API_KEY", 1_048_576),
 
     # A local runtime, priced at zero because it costs machine time rather than

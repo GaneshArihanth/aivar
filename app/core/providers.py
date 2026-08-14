@@ -136,11 +136,32 @@ def _openai_request(model_id: str, payload: dict, key: str | None) -> UpstreamCa
 
 
 def _openai_response(body: dict) -> UpstreamResult:
+    """Normalise usage, counting reasoning tokens the caller never sees.
+
+    ``completion_tokens`` is not reliably the whole billable output. Gemini's
+    OpenAI-compatible endpoint reports the visible completion only, and bills
+    the model's internal reasoning on top:
+
+        prompt_tokens 8 · completion_tokens 3 · total_tokens 119
+
+    Metering the 3 there under-counts real spend roughly thirty-fold, which is
+    the one mistake this proxy cannot make — an agent would run far past a
+    budget the ledger still believed was healthy.
+
+    So the billable completion is whichever is larger: what the provider called
+    completion, or what is left of the total after the prompt. Where the two
+    already agree — OpenAI folds reasoning into completion_tokens — this
+    changes nothing, and it degrades safely if total_tokens is absent.
+    """
     usage = body.get("usage") or {}
+    prompt_tokens = int(usage.get("prompt_tokens") or 0)
+    reported = int(usage.get("completion_tokens") or 0)
+    total = int(usage.get("total_tokens") or 0)
+
     return UpstreamResult(
         body=body,
-        prompt_tokens=int(usage.get("prompt_tokens") or 0),
-        completion_tokens=int(usage.get("completion_tokens") or 0),
+        prompt_tokens=prompt_tokens,
+        completion_tokens=max(reported, total - prompt_tokens),
         has_usage=bool(usage),
     )
 

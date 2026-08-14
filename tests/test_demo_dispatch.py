@@ -176,3 +176,47 @@ def test_blank_means_no_credential_needed(value):
     from app.api.schemas import ModelUpdateRequest
 
     assert ModelUpdateRequest(api_key_env=value).api_key_env is None
+
+
+# ------------------------------------------------ reasoning tokens are billable
+
+
+def test_reasoning_tokens_are_metered():
+    """Gemini 3.x bills internal reasoning that completion_tokens omits.
+
+    A real response: prompt 8, completion 3, total 119. Billing the 3 would
+    under-count spend ~36x and let an agent run far past a budget the ledger
+    still believed was healthy.
+    """
+    result = providers.parse_response(
+        "openai",
+        {"usage": {"prompt_tokens": 8, "completion_tokens": 3, "total_tokens": 119}},
+    )
+
+    assert result.prompt_tokens == 8
+    assert result.completion_tokens == 111  # 119 total - 8 prompt
+
+
+def test_providers_folding_reasoning_into_completion_are_unchanged():
+    """OpenAI already includes reasoning in completion_tokens; do not double it."""
+    result = providers.parse_response(
+        "openai",
+        {"usage": {"prompt_tokens": 10, "completion_tokens": 40, "total_tokens": 50}},
+    )
+
+    assert result.completion_tokens == 40
+
+
+def test_missing_total_falls_back_to_the_reported_completion():
+    """Absent total_tokens, the reported figure is all there is."""
+    result = providers.parse_response(
+        "openai", {"usage": {"prompt_tokens": 10, "completion_tokens": 25}}
+    )
+
+    assert result.completion_tokens == 25
+
+
+def test_absent_usage_meters_nothing():
+    result = providers.parse_response("openai", {})
+    assert result.has_usage is False
+    assert result.completion_tokens == 0

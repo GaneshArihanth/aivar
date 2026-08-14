@@ -107,7 +107,7 @@ async def test_multi_step_cross_provider_chain_degrades_all_the_way_down(
     agent = await make_agent(monthly_usd=0.20, session_usd=0.20, model="gpt-4o")
 
     await api.patch(f"/admin/agents/{agent.id}", json={"allow_cross_provider": True})
-    chain = ["gpt-4o", "claude-haiku-4-5", "gpt-4o-mini", "gemini-2.0-flash-lite"]
+    chain = ["gpt-4o", "claude-haiku-4-5", "gpt-4o-mini", "gemini-3.5-flash-lite"]
     saved = await api.put(f"/admin/agents/{agent.id}/chain", json={"chain": chain})
     assert saved.status_code == 200, saved.text
     assert saved.json()["crosses_providers"] is True
@@ -121,7 +121,7 @@ async def test_multi_step_cross_provider_chain_degrades_all_the_way_down(
     #
     # At max_tokens=400 a reservation costs roughly:
     #   gpt-4o $0.00404 · claude-haiku $0.00161 · gpt-4o-mini $0.00024 ·
-    #   gemini-flash-lite $0.00012
+    #   gemini-3.5-flash-lite $0.00012
     async def squeeze(headroom_usd: float) -> None:
         consumed = (await agent_status(api, agent))["consumed_usd"]
         # Pressure engages at 90%, so leave exactly `headroom` below that line.
@@ -133,7 +133,7 @@ async def test_multi_step_cross_provider_chain_degrades_all_the_way_down(
     expectations = [
         (0.0030, "claude-haiku-4-5"),        # too tight for gpt-4o
         (0.0005, "gpt-4o-mini"),             # too tight for claude as well
-        (0.0002, "gemini-2.0-flash-lite"),   # only the last rung fits
+        (0.0002, "gemini-3.5-flash-lite"),   # only the last rung fits
     ]
 
     first = await call(api, agent, session_id="ladder-head", max_tokens=400)
