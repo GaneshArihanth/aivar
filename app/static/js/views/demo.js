@@ -343,18 +343,42 @@ function chatMarkup() {
 
 /* ------------------------------------------------------------------- actions */
 
-async function createAgent() {
+// Team budgets are enforced above agent budgets, so the demo agent needs a team
+// with headroom or every call is refused before its own budget is even
+// consulted. Comfortably larger than the agent budget: the point is for the
+// agent limit to be the one that binds.
+const DEMO_TEAM_NAME = "Demo";
+const DEMO_TEAM_BUDGET_USD = 1;
+
+/** Find the demo team, creating it once if absent.
+ *
+ * The page used to borrow whichever team sorted first, which put demo traffic
+ * on a real product's budget and — because leftover test fixtures sort ahead of
+ * the seeded teams — landed on a $0.0001 throwaway whose budget was already
+ * exhausted. Every call then failed with "team monthly budget exhausted" while
+ * the agent's own budget sat untouched at 0%, which reads as a broken demo
+ * rather than as enforcement working correctly one scope up.
+ */
+async function demoTeamId() {
   const teams = await api.get("/admin/teams");
-  if (!teams.length) {
-    toast("No teams exist — seed the fleet first.", "error");
-    return;
-  }
+  const existing = teams.find((t) => t.name === DEMO_TEAM_NAME);
+  if (existing) return existing.id;
+
+  const created = await api.post("/admin/teams", {
+    name: DEMO_TEAM_NAME,
+    monthly_budget_usd: DEMO_TEAM_BUDGET_USD,
+  });
+  return created.id;
+}
+
+async function createAgent() {
+  const teamId = await demoTeamId();
   const name = `demo-${Math.random().toString(36).slice(2, 8)}`;
   // The raw key comes back alongside the agent, not inside it — this is the
   // only response in the API that carries one, and only this once.
   const created = await api.post("/admin/agents", {
     name,
-    team_id: teams[0].id,
+    team_id: teamId,
     monthly_budget_usd: DEMO_MONTHLY_USD,
     session_budget_usd: DEMO_SESSION_USD,
     preferred_model: state.model,
