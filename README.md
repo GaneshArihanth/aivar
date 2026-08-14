@@ -14,17 +14,38 @@ agent ──▶ Agent Budget Controller ──▶ OpenAI / Anthropic / Gemini / 
              └── reject · downgrade · pause · freeze
 ```
 
+### At a glance
+
+| | |
+|---|---|
+| **What it is** | A drop-in proxy that speaks the OpenAI API and refuses calls a budget cannot cover |
+| **What it stops** | Runaway agents, silent overspend, surprise invoices |
+| **How it decides** | Reserve worst-case cost → forward → settle against real usage, all atomic |
+| **Limits** | Team (monthly) · agent (monthly) · session (per conversation) |
+| **When money runs low** | 80% warn → 90% downgrade to a cheaper model → 100% refuse → runaway pause |
+| **Stack** | FastAPI · Redis + Lua · PostgreSQL · vanilla-JS dashboard, no build step |
+| **Providers** | OpenAI · Anthropic · Gemini · Ollama / vLLM / any OpenAI-compatible endpoint |
+| **Tests** | 134, including a 500-way concurrency proof |
+
 ---
 
 ## Contents
 
+**Start here** — what it does and why it is built this way.
+
 1. [The problem](#the-problem)
-2. [The central design problem](#the-central-design-problem)
+2. [The central design problem](#the-central-design-problem) ← the one idea worth reading
 3. [Quick start](#quick-start)
+
+**Using it**
+
 4. [Using it from an agent](#using-it-from-an-agent)
 5. [The dashboard](#the-dashboard)
 6. [Enforcement model](#enforcement-model)
 7. [Features in detail](#features-in-detail)
+
+**Reference** — dip in as needed; no need to read front to back.
+
 8. [API reference](#api-reference)
 9. [Data model](#data-model)
 10. [Redis keyspace](#redis-keyspace)
@@ -33,9 +54,17 @@ agent ──▶ Agent Budget Controller ──▶ OpenAI / Anthropic / Gemini / 
 13. [Configuration](#configuration)
 14. [Testing](#testing)
 15. [Operations](#operations)
+
+**Judgement calls**
+
 16. [Design decisions and trade-offs](#design-decisions-and-trade-offs)
 17. [Known limitations](#known-limitations)
 18. [Troubleshooting](#troubleshooting)
+
+> **In a hurry?** Read [the central design problem](#the-central-design-problem)
+> — it is the only genuinely hard part — then run [Quick start](#quick-start)
+> and open the Demo page. Ten minutes gets you from nothing to watching a real
+> budget stop a real call.
 
 ---
 
@@ -112,6 +141,12 @@ Then open **http://127.0.0.1:8000/dashboard**.
 
 `make seed` prints twelve API keys **once**. They are stored only as HMACs and
 cannot be recovered — rotate a key from the dashboard if you lose one.
+
+**To see enforcement actually happen**, open the **Demo** tab, click *Create
+demo agent*, then *Exhaust the budget*. It walks the ladder in about six calls:
+successful calls metering real cost, a downgrade to a cheaper model under
+pressure, then `HTTP 402` when the budget is gone. Free — it runs against the
+bundled mock unless you tick *Use real provider*.
 
 Deploying to AWS from GitHub with Terraform: **[DEPLOY.md](DEPLOY.md)**.
 
@@ -202,7 +237,7 @@ Every error uses one envelope, whichever layer produced it:
 
 ## The dashboard
 
-Four pages, served as static files with **no build step** — native ES modules,
+Five pages, served as static files with **no build step** — native ES modules,
 hand-rolled SVG charts, no bundler and no CDN. Live data arrives over SSE with a
 3-second poll as a safety net.
 
@@ -247,6 +282,32 @@ The pricing catalog. Register a custom or self-hosted model, set input/output
 cost per 1k tokens, choose the wire format, test connectivity, edit, delete.
 Shows which environment variable each model needs and whether it currently
 resolves — never the value.
+
+Below it, **Provider credentials**: set an API key from the browser. A deployed
+instance has no shell, so the alternative is editing an SSM parameter and
+redeploying. Keys are encrypted before storage, shown only by their last four
+characters, and never returned by any endpoint. A value already present in the
+environment wins, and the panel says so rather than letting you save something
+that would be silently ignored.
+
+### Demo (`#/demo`)
+
+Where you watch the controller decide, rather than reading what it decided.
+
+It mints a throwaway agent on a deliberately tiny budget — a tenth of a cent —
+because that is what makes enforcement visible: Gemini Flash costs $0.0001 per
+1k input tokens, so a normal $50 agent would need hundreds of millions of
+tokens before a single threshold moved.
+
+- **Chat panel** — multi-turn, so the budget visibly drains per turn
+- **Per-call telemetry** — cost, model requested vs served, substitution reason
+- **Scenario buttons** — one per enforcement path: a normal call, the 80%
+  warning, forced substitution, the 100% hard stop, and the runaway breaker
+- **Live provider toggle** — sends that one call to the real endpoint while the
+  rest of the system stays on the free mock
+
+Blocked calls are rendered as the point of the exercise, not as errors: an
+`HTTP 402 budget_exhausted` panel is the product working.
 
 ### Event detail overlay
 
@@ -319,7 +380,7 @@ Eleven models across four providers are seeded with their real endpoints:
 |---|---|---|
 | OpenAI | gpt-4o, gpt-4.1, gpt-4.1-mini, gpt-4o-mini, gpt-4.1-nano | `api.openai.com/v1` |
 | Anthropic | claude-opus-4, claude-sonnet-4, claude-haiku-4-5 | `api.anthropic.com/v1` |
-| Google | gemini-2.0-flash, gemini-2.0-flash-lite | Gemini's OpenAI-compat endpoint |
+| Google | gemini-3.5-flash, gemini-3.5-flash-lite | Gemini's OpenAI-compat endpoint |
 | Local | llama3.1:8b | `localhost:11434/v1`, priced at zero |
 
 **Wire formats.** `provider_kind` decides how a request is translated:
@@ -343,9 +404,21 @@ It is deliberately **not** "go live whenever a key happens to be present" — a
 tool built to prevent surprise spend must not start spending real money because
 an unrelated `OPENAI_API_KEY` was exported in a shell.
 
-**Credentials** are referenced by environment-variable *name*. The value is
-never accepted by the API, never stored, and never returned; the UI shows only
-whether the named variable resolves.
+**Credentials** are referenced by environment-variable *name* — pasting a key
+into that field is refused, because the catalog renders it and this dashboard
+has no authentication. The key itself is set separately, either in the
+environment or through the credentials panel, which encrypts it before storage.
+Either way it is never returned by any endpoint and never logged; only the last
+four characters are ever shown.
+
+**Reasoning tokens are billed.** `completion_tokens` is not reliably the whole
+billable output: Gemini 3.x reports the visible completion and charges its
+internal reasoning on top, so a real response reads prompt 8, completion 3,
+total 119. Metering the 3 would under-count that call roughly thirty-fold and
+let an agent run far past a budget the ledger still believed was healthy — the
+one mistake this proxy cannot make. The billable figure is therefore
+`max(completion_tokens, total_tokens − prompt_tokens)`, which leaves
+OpenAI-shaped responses untouched because they already fold reasoning in.
 
 **Test button** always probes the model's *own* endpoint, even in mock mode —
 a test that answers about the mock while you are asking about your Ollama box
@@ -357,7 +430,7 @@ A chain is the ordered ladder the proxy walks when the preferred model no
 longer fits:
 
 ```
-gpt-4o → claude-sonnet-4 → gpt-4o-mini → gemini-2.0-flash-lite
+gpt-4o → claude-sonnet-4 → gpt-4o-mini → gemini-3.5-flash-lite
 ```
 
 - Derived automatically from the catalog (same provider, descending cost), or
@@ -452,7 +525,7 @@ that window is where requests slip through.
 
 ## API reference
 
-40 endpoints. `/admin/*` is unauthenticated — see the security note under
+44 endpoints. `/admin/*` is unauthenticated — see the security note under
 [Known limitations](#known-limitations).
 
 ### Proxy
@@ -516,6 +589,23 @@ that window is where requests slip through.
 | `DELETE` | `/admin/models/{id}` | Remove (refused while in use; pruned from chains) |
 | `POST` | `/admin/models/{id}/test` | Probe the model's own endpoint |
 | `GET` | `/admin/models/provider-kinds` | Supported wire formats and dispatchability |
+
+### Provider credentials
+
+Write-only. No endpoint returns a key; the listing carries the last four
+characters and which source currently wins.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/admin/credentials` | Which keys are configured, and from where |
+| `PUT` | `/admin/credentials/{env_name}` | Store a key, encrypted |
+| `DELETE` | `/admin/credentials/{env_name}` | Remove a stored key |
+
+### Demo
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/admin/demo/config` | Whether live dispatch is allowed, and which models are ready |
 
 ### Global controls
 
@@ -701,13 +791,15 @@ app/
     security.py        key generation, HMAC hashing, auth cache
     tokenizer.py       heuristic / tiktoken
     events.py          PostgreSQL audit + Redis pub/sub
+    credentials.py     dashboard-set provider keys, encrypted at rest
 
   api/
     proxy.py           POST /v1/chat/completions
     admin_agents.py    agent CRUD, chain, history, sessions, move
     admin_config.py    teams
     admin_models.py    catalog
-    admin_controls.py  freeze, boost
+    admin_controls.py  freeze, boost, demo config
+    admin_credentials.py  provider keys: write-only, never returned
     status.py          status, calls, events, reconcile
     stream.py          SSE
     schemas.py         Pydantic models
@@ -722,17 +814,17 @@ app/
     reaper.py          releases orphaned holds
     reconciler.py      Redis ⇄ ledger drift and rebuild
 
-  static/              dashboard: index.html, css/, js/ (18 modules)
+  static/              dashboard: index.html, css/, js/ (20 modules)
 
 mock_llm/main.py       OpenAI-shaped fake provider, latency + failure injection
 loadgen/main.py        scenario runner
 tests/                 unit · integration · criteria
 scripts/               setup · devctl · demo · seed · reconcile · verify_phase1
 infra/redis.conf       project-local Redis config
-alembic/versions/      6 migrations
+alembic/versions/      7 migrations
 ```
 
-~16,250 lines including tests.
+~16,600 lines including tests.
 
 ---
 
@@ -750,7 +842,11 @@ Everything is environment-driven; see `.env.example`.
 | `UPSTREAM_BASE_URL` | `http://127.0.0.1:9000/v1` | Include the version prefix |
 | `UPSTREAM_MODE` | `mock` | `live` uses each model's own endpoint |
 | `UPSTREAM_TIMEOUT_SECONDS` | `30.0` | |
-| `API_KEY_PEPPER` | random per process | **Set this** — otherwise every key breaks on restart |
+| `OPENAI_API_KEY` | unset | Read via Settings, so `.env` works under `make dev` as well as Docker |
+| `ANTHROPIC_API_KEY` | unset | |
+| `GEMINI_API_KEY` | unset | |
+| `DEMO_ALLOW_LIVE` | `true` | Lets the Demo page send one call to a real provider while everything else stays on the mock. Set `false` to remove the toggle |
+| `API_KEY_PEPPER` | random per process | **Set this** — otherwise every key breaks on restart, and dashboard-stored provider keys become undecryptable |
 | `ENFORCEMENT_FAIL_MODE` | `closed` | Reject when Redis is unreachable |
 | `DEFAULT_WARN_THRESHOLD` | `0.80` | |
 | `DEFAULT_SUBSTITUTION_THRESHOLD` | `0.90` | |
@@ -767,7 +863,7 @@ Everything is environment-driven; see `.env.example`.
 
 ## Testing
 
-**108 tests**, all green.
+**134 tests**, all green.
 
 ```bash
 make test           # everything
@@ -928,6 +1024,18 @@ plane should not need, or a bundler. Static assets are served with
   and `/v1/chat/completions` still requires a valid `X-Agent-Key`.
   There is no application-level switch to turn this on — restrict by network
   instead (`allowed_cidrs`, a VPN, or auth at the reverse proxy).
+- **That extends to provider credentials.** Anyone reaching the dashboard can
+  *overwrite* a stored key. They cannot read one back — no endpoint returns a
+  value — but they can replace it, and with the Demo page's live toggle they can
+  spend against your provider quota. Set `DEMO_ALLOW_LIVE=false` to remove the
+  toggle.
+- **Serve it over HTTPS before submitting a key.** On plain HTTP the key crosses
+  the network in cleartext. The AWS default is `site_address = ":80"`; set a
+  domain and Caddy obtains a certificate automatically. The dialog warns when
+  the page is not HTTPS, but a warning is not a fix.
+- **Stored credentials are tied to `API_KEY_PEPPER`.** Change it and they become
+  undecryptable, exactly as agent key hashes become unverifiable. The app logs a
+  warning and starts anyway, so you can re-enter them.
 - **Rate limits allow a 2× burst across a minute boundary** (fixed window, as
   above).
 - **`move_agent.lua` spans two hash tags**, so it is atomic on standalone Redis
