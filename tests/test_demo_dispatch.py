@@ -220,3 +220,69 @@ def test_absent_usage_meters_nothing():
     result = providers.parse_response("openai", {})
     assert result.has_usage is False
     assert result.completion_tokens == 0
+
+
+# ------------------------------------------------- dashboard-set credentials
+
+
+def test_stored_credential_round_trips_through_encryption(monkeypatch):
+    """Encrypted at rest, decrypted into the in-memory mirror."""
+    from app.core import credentials
+
+    monkeypatch.setattr(credentials.settings, "api_key_pepper", "pepper-for-tests")
+    fernet = credentials._fernet()
+    token = fernet.encrypt(b"sk-stored-value-1234")
+
+    assert fernet.decrypt(token).decode() == "sk-stored-value-1234"
+
+
+def test_stored_credential_is_the_lowest_precedence(monkeypatch):
+    """Deployed config must beat a value submitted through a public web form."""
+    from app.core import credentials
+
+    monkeypatch.setitem(credentials._cache, "GEMINI_API_KEY", "from-dashboard")
+
+    # Nothing else set: the stored value is used.
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr(providers.settings, "gemini_api_key", "")
+    assert providers.resolve_credential("GEMINI_API_KEY") == "from-dashboard"
+
+    # .env wins over it.
+    monkeypatch.setattr(providers.settings, "gemini_api_key", "from-dotenv")
+    assert providers.resolve_credential("GEMINI_API_KEY") == "from-dotenv"
+
+    # The environment wins over both.
+    monkeypatch.setenv("GEMINI_API_KEY", "from-environ")
+    assert providers.resolve_credential("GEMINI_API_KEY") == "from-environ"
+
+
+def test_describe_exposes_only_the_last_four_characters():
+    """The listing endpoint builds on this; it must never carry key material."""
+    from app.core import credentials
+
+    credentials._cache.clear()
+    credentials._cache["OPENAI_API_KEY"] = "sk-secret-abcdWXYZ"
+    try:
+        described = credentials.describe()
+        assert described == {"OPENAI_API_KEY": "WXYZ"}
+        assert "secret" not in str(described)
+    finally:
+        credentials._cache.clear()
+
+
+def test_an_undecryptable_row_is_skipped_not_fatal(monkeypatch):
+    """A changed pepper must not stop the app booting.
+
+    The operator needs a running dashboard to re-enter the key, so a row that
+    cannot be decrypted is dropped with a warning rather than raised.
+    """
+    from cryptography.fernet import InvalidToken
+
+    from app.core import credentials
+
+    monkeypatch.setattr(credentials.settings, "api_key_pepper", "pepper-a")
+    token = credentials._fernet().encrypt(b"value")
+
+    monkeypatch.setattr(credentials.settings, "api_key_pepper", "pepper-b")
+    with pytest.raises(InvalidToken):
+        credentials._fernet().decrypt(token)

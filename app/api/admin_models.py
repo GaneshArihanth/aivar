@@ -243,3 +243,4 @@ async def _prune_from_chains(model_id: str) -> None:
             chain = policy.fallback_chain or []
             if model_id in chain:
                 policy.fallback_chain = [m for m in chain if m != model_id]
+

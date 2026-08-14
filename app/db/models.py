@@ -27,6 +27,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -363,3 +364,27 @@ class BudgetEvent(Base):
     actor: Mapped[str | None] = mapped_column(String(120), nullable=True)
     payload: Mapped[dict] = mapped_column(JSONVariant, default=dict, nullable=False)
     message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class ProviderCredential(Base):
+    """A provider API key set through the dashboard, encrypted at rest.
+
+    Keyed by the environment variable name the model catalog already refers to
+    (GEMINI_API_KEY), so this is a fallback for the same lookup rather than a
+    parallel notion of identity.
+
+    ``ciphertext`` is Fernet, keyed off API_KEY_PEPPER. ``last4`` is stored in
+    the clear on purpose: the dashboard has to show *which* key is configured,
+    and deriving that per page render would mean decrypting a secret to draw a
+    label. Four characters cannot reconstruct a key but are enough to tell two
+    apart.
+    """
+
+    __tablename__ = "provider_credentials"
+
+    env_name: Mapped[str] = mapped_column(String(80), primary_key=True)
+    ciphertext: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    last4: Mapped[str] = mapped_column(String(8), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )

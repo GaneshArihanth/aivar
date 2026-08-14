@@ -8,6 +8,7 @@
 
 import { api } from "../api.js";
 import { confirmDialog, openModal, toast } from "../components.js";
+import { credentialsPanel, editCredential } from "../credentials.js";
 import { store } from "../store.js";
 import { $, $$, esc, num, usdPrecise } from "../util.js";
 
@@ -157,8 +158,8 @@ function formMarkup(model) {
         <input id="m-key" name="api_key_env" type="text" value="${value("api_key_env")}"
                placeholder="OPENAI_API_KEY" autocomplete="off" />
         <p class="field-hint">
-          The variable <em>name</em>, not the key. Secrets stay in the environment —
-          this app never stores or displays them.
+          The variable <em>name</em>, not the key — pasting a key here is refused.
+          Set the key itself below, or in the environment.
         </p>
       </div>
 
@@ -272,14 +273,16 @@ export function modelsView(outlet) {
           <tbody><tr><td colspan="8" class="empty">Loading…</td></tr></tbody>
         </table>
       </div>
-    </section>`;
+    </section>
+    <div id="credentials-panel"></div>`;
 
   const tbody = $("#models-table tbody", outlet);
 
   async function load() {
-    const [models, kindInfo] = await Promise.all([
+    const [models, kindInfo, credInfo] = await Promise.all([
       api.get("/admin/models"),
       api.get("/admin/models/provider-kinds"),
+      api.get("/admin/credentials"),
     ]);
     kinds = kindInfo.kinds;
     mode = kindInfo.mode;
@@ -298,6 +301,18 @@ export function modelsView(outlet) {
     // Keep the shared store's copy fresh so the new-agent modal lists the same
     // catalog this page is editing.
     store.models = models.filter((m) => m.is_active);
+
+    // Reloaded wholesale after any change: the credential rows and the
+    // catalog's own "credential present" pills read the same state, so
+    // refreshing one without the other would leave them disagreeing.
+    const credPanel = $("#credentials-panel", outlet);
+    credPanel.innerHTML = credentialsPanel(credInfo.credentials || []);
+    credPanel.querySelectorAll("[data-cred]").forEach((btn) => {
+      const cred = (credInfo.credentials || []).find(
+        (c) => c.env_name === btn.dataset.cred
+      );
+      btn.onclick = () => editCredential(cred, load);
+    });
     return models;
   }
 

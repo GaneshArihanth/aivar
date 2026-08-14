@@ -407,6 +407,36 @@ curl -sI https://budget.example.com/health | head -1
 
 ---
 
+## Setting provider keys from the dashboard
+
+A deployed instance has no shell, so the Models page has a **Provider
+credentials** panel: paste a key, and it is encrypted and stored without a
+redeploy. Values are never returned by the API — the page shows only the last
+four characters — and never logged.
+
+Precedence, highest first:
+
+1. a real environment variable
+2. `.env` / SSM (delivered as environment variables by compose)
+3. a key stored through the dashboard
+
+Deployed configuration therefore always wins, and the panel says so rather than
+letting you save a value that would be silently ignored.
+
+Two things to be clear about before using it:
+
+- **Serve the site over HTTPS first.** With `site_address = ":80"` the key is
+  submitted in cleartext and readable by anyone on the network path. Set
+  `site_address` to a domain and `acme_email` to your address, and Caddy
+  obtains a certificate automatically — see step 10.
+- **There is no authentication.** Anyone who can reach the dashboard can
+  replace a stored key. They cannot read one back, but they can overwrite it.
+  Narrow `allowed_cidrs` if that matters to you.
+
+Stored keys are encrypted with a key derived from `API_KEY_PEPPER`, so changing
+the pepper makes them undecryptable — the same rule that already applies to
+agent keys. The app logs a warning and starts anyway, so you can re-enter them.
+
 ## Going live against real providers
 
 The deployment runs against the bundled mock provider by default, so the whole

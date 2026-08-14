@@ -117,7 +117,15 @@ def resolve_credential(api_key_env: str | None) -> str | None:
     if value:
         return value
     # Same name, lowercased, is the settings field: GEMINI_API_KEY -> gemini_api_key.
-    return getattr(settings, api_key_env.lower(), None) or None
+    from_settings = getattr(settings, api_key_env.lower(), None)
+    if from_settings:
+        return from_settings
+    # Last: a key set through the dashboard. Deliberately lowest precedence, so
+    # a value deployed by an operator through SSM or .env always wins over one
+    # submitted through a web form that anyone can reach.
+    from app.core import credentials
+
+    return credentials.get(api_key_env)
 
 
 # ------------------------------------------------------------------ openai

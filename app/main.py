@@ -16,13 +16,14 @@ from app.api import (
     admin_agents,
     admin_config,
     admin_controls,
+    admin_credentials,
     admin_models,
     proxy,
     status as status_api,
     stream,
 )
 from app.config import settings
-from app.core import upstream
+from app.core import credentials, upstream
 from app.core.pricing import pricing
 from app.db.session import dispose_engine, init_engine, session_scope
 from app.logging_setup import configure_logging
@@ -51,6 +52,8 @@ async def lifespan(app: FastAPI):
     # rather than joined per call.
     async with session_scope() as session:
         await pricing.load(session)
+        # Same reasoning: looked up on the dispatch path from sync code.
+        await credentials.load(session)
 
     reaper_task = asyncio.create_task(reaper.run_forever())
 
@@ -129,6 +132,7 @@ def create_app() -> FastAPI:
     app.include_router(admin_agents.router)
     app.include_router(admin_config.router)
     app.include_router(admin_models.router)
+    app.include_router(admin_credentials.router)
     app.include_router(admin_controls.router)
 
     class RevalidatingStatics(StaticFiles):
