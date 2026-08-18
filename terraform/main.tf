@@ -180,16 +180,39 @@ resource "aws_ssm_parameter" "postgres_password" {
   tags  = local.tags
 }
 
-resource "aws_ssm_parameter" "provider_keys" {
-  for_each = {
+# Only for keys you actually have.
+#
+# SSM rejects an empty parameter value, so the previous version substituted the
+# literal string "unset". That is indistinguishable from a real key to
+# everything downstream: the environment variable was set, so the app reported
+# the provider as configured, the dashboard refused to let you edit it — the
+# whole point of the credentials panel — and a live dispatch would have sent
+# `Authorization: Bearer unset` and got back a 401 that named nothing useful.
+#
+# Creating no parameter at all is the honest encoding of "not configured": the
+# variable is simply absent, and every layer already handles that correctly.
+locals {
+  provider_keys = {
     OPENAI_API_KEY    = var.openai_api_key
     ANTHROPIC_API_KEY = var.anthropic_api_key
     GEMINI_API_KEY    = var.gemini_api_key
   }
 
+  # Terraform will not key resources off a sensitive value, since the key
+  # becomes a visible resource address. nonsensitive() is applied to the
+  # emptiness *test* rather than the key: whether a credential was supplied is
+  # not itself a secret, and the key material never leaves the map.
+  configured_provider_keys = toset([
+    for name, value in local.provider_keys : name if nonsensitive(value != "")
+  ])
+}
+
+resource "aws_ssm_parameter" "provider_keys" {
+  for_each = local.configured_provider_keys
+
   name  = "/${var.project}/${each.key}"
   type  = "SecureString"
-  value = each.value == "" ? "unset" : each.value
+  value = local.provider_keys[each.key]
   tags  = local.tags
 }
 
@@ -301,6 +324,20 @@ resource "aws_instance" "app" {
   # PostgreSQL's volume is this instance's root volume. Note that a stop/start
   # still costs a new public IP unless an Elastic IP or a domain is in play.
   user_data_replace_on_change = false
+
+  lifecycle {
+    # The AMI is resolved from an SSM "latest" alias, so it changes whenever AWS
+    # publishes a new Amazon Linux build — roughly monthly. Without this, the
+    # next `terraform apply` after any such release plans a *replacement*, and
+    # since PostgreSQL's volume is this instance's root volume, that silently
+    # destroys the database. The trigger is a date on someone else's release
+    # schedule, so it would land on an unrelated apply with no warning.
+    #
+    # The AMI only matters at first boot: everything that serves traffic runs in
+    # containers pulled at deploy time. Patch the running host with dnf, and
+    # rebuild deliberately — after taking a dump — when you want a newer base.
+    ignore_changes = [ami]
+  }
 
   tags = merge(local.tags, { Name = "${var.project}-app" })
 }
