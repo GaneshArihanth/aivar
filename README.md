@@ -18,57 +18,106 @@ agent ──▶ Agent Budget Controller ──▶ OpenAI / Anthropic / Gemini / 
 
 | | |
 |---|---|
-| **What it is** | A drop-in proxy that speaks the OpenAI API and refuses calls a budget cannot cover |
-| **What it stops** | Runaway agents, silent overspend, surprise invoices |
-| **How it decides** | Reserve worst-case cost → forward → settle against real usage, all atomic |
-| **Limits** | Team (monthly) · agent (monthly) · session (per conversation) |
-| **When money runs low** | 80% warn → 90% downgrade to a cheaper model → 100% refuse → runaway pause |
-| **Stack** | FastAPI · Redis + Lua · PostgreSQL · vanilla-JS dashboard, no build step |
-| **Providers** | OpenAI · Anthropic · Gemini · Ollama / vLLM / any OpenAI-compatible endpoint |
-| **Tests** | 135, including a 500-way concurrency proof |
+| 🎯 **What it is** | A drop-in proxy that speaks the OpenAI API and refuses calls a budget cannot cover |
+| 🛑 **What it stops** | Runaway agents, silent overspend, surprise invoices |
+| 🧠 **How it decides** | Reserve worst-case cost → forward → settle against real usage, all atomic |
+| 📏 **Limits** | Team (monthly) · agent (monthly) · session (per conversation) |
+| 📉 **When money runs low** | 80% warn → 90% downgrade to a cheaper model → 100% refuse → runaway pause |
+| 🧱 **Stack** | FastAPI · Redis + Lua · PostgreSQL · vanilla-JS dashboard, no build step |
+| 🔌 **Providers** | OpenAI · Anthropic · Gemini · Ollama / vLLM / any OpenAI-compatible endpoint |
+| 🧪 **Tests** | 135, including a 500-way concurrency proof |
 
 ---
 
-## Contents
+## 💡 New here? Read this first
 
-**Start here** — what it does and why it is built this way.
+**Skip this section if you already work with LLM APIs.** Otherwise, four ideas
+are enough to understand the whole project.
 
-1. [The problem](#the-problem)
-2. [The central design problem](#the-central-design-problem) ← the one idea worth reading
-3. [Quick start](#quick-start)
+**🤖 An "agent" is a program that calls an AI model in a loop.** It might read a
+support ticket, ask the model to draft a reply, check the draft, ask again.
+Nobody types those requests — the program decides when to make them.
 
-**Using it**
+**💸 Every request costs money, charged by the word.** Providers bill per
+*token*, roughly ¾ of a word. Individually this is tiny — a question and answer
+might cost $0.002. The catch is that a program can send thousands per minute
+without ever getting tired.
 
-4. [Using it from an agent](#using-it-from-an-agent)
-5. [The dashboard](#the-dashboard)
-6. [Enforcement model](#enforcement-model)
-7. [Features in detail](#features-in-detail)
+**🌙 So the classic disaster is a loop nobody is watching.** An agent gets stuck,
+retries all night, and makes 50,000 calls. You find out when the invoice
+arrives, because that is the first moment anyone looked.
 
-**Reference** — dip in as needed; no need to read front to back.
+**🛑 This project moves that decision earlier.** Instead of calling the provider
+directly, your agents call *this* — and it decides whether each request is
+affordable **before** forwarding it. Out of budget means the request is refused,
+or quietly downgraded to a cheaper model. The money is never spent, so there is
+no invoice to be surprised by.
 
-8. [API reference](#api-reference)
-9. [Data model](#data-model)
-10. [Redis keyspace](#redis-keyspace)
-11. [The Lua scripts](#the-lua-scripts)
-12. [Code layout](#code-layout)
-13. [Configuration](#configuration)
-14. [Testing](#testing)
-15. [Operations](#operations)
+```
+     Without this                          With this
+     ────────────                          ─────────
 
-**Judgement calls**
+  agent ──▶ OpenAI  💸                agent ──▶ 🛡️ budget check ──▶ OpenAI  ✅
+        └─ 50,000 calls                              │
+           overnight                                 └─ ❌ refused, $0 spent
+        └─ 😱 invoice
+```
 
-16. [Design decisions and trade-offs](#design-decisions-and-trade-offs)
-17. [Known limitations](#known-limitations)
-18. [Troubleshooting](#troubleshooting)
+### 📚 Words used throughout
 
-> **In a hurry?** Read [the central design problem](#the-central-design-problem)
-> — it is the only genuinely hard part — then run [Quick start](#quick-start)
+| Term | Plain meaning |
+|---|---|
+| **Token** | A chunk of text, ~¾ of a word. Providers charge per token. |
+| **Agent** | One program that calls the model. Each gets its own key and budget. |
+| **Team** | A group of agents sharing a bigger budget — usually a product or department. |
+| **Session** | One conversation. A cap here stops a single runaway chat. |
+| **Proxy** | Software that sits in the middle of a request and can inspect or block it. |
+| **Fallback chain** | A ladder of cheaper models to step down to when money is tight. |
+| **Runaway** | An agent burning money far faster than normal — usually a stuck loop. |
+
+---
+
+## 📖 Contents
+
+**🟢 Start here** — what it does and why it is built this way.
+
+1. 💡 [New here? Read this first](#-new-here-read-this-first)
+2. 🔥 [The problem](#-the-problem)
+3. 🧠 [The central design problem](#-the-central-design-problem) ← the one idea worth reading
+4. 🚀 [Quick start](#-quick-start)
+
+**🔵 Using it**
+
+5. 🔌 [Using it from an agent](#-using-it-from-an-agent)
+6. 📊 [The dashboard](#-the-dashboard)
+7. 🛡️ [Enforcement model](#-enforcement-model)
+8. ✨ [Features in detail](#-features-in-detail)
+
+**⚪ Reference** — dip in as needed; no need to read front to back.
+
+9. 📡 [API reference](#-api-reference)
+10. 🗄️ [Data model](#-data-model)
+11. 🔑 [Redis keyspace](#-redis-keyspace)
+12. ⚡ [The Lua scripts](#-the-lua-scripts)
+13. 📁 [Code layout](#-code-layout)
+14. ⚙️ [Configuration](#-configuration)
+15. 🧪 [Testing](#-testing)
+16. 🔧 [Operations](#-operations)
+
+**🟣 Judgement calls**
+
+17. ⚖️ [Design decisions and trade-offs](#-design-decisions-and-trade-offs)
+18. ⚠️ [Known limitations](#-known-limitations)
+19. 🩺 [Troubleshooting](#-troubleshooting)
+
+> ⏱️ **In a hurry?** Read [the central design problem](#-the-central-design-problem)
+> — it is the only genuinely hard part — then run [Quick start](#-quick-start)
 > and open the Demo page. Ten minutes gets you from nothing to watching a real
 > budget stop a real call.
 
 ---
 
-## The problem
+## 🔥 The problem
 
 An engineering team runs twelve agents across four products against a shared
 LLM budget. One agent enters a recursive loop and makes 50,000 API calls
@@ -82,7 +131,7 @@ This project puts the control where the request is.
 
 ---
 
-## The central design problem
+## 🧠 The central design problem
 
 **The cost of an LLM call is unknown until it completes, but the allow/deny
 decision has to happen before it starts.**
@@ -126,18 +175,31 @@ with room for exactly 100, and asserts **exactly 100** are admitted — not
 
 ---
 
-## Quick start
+## 🚀 Quick start
 
 Requires macOS with Homebrew. Python 3.14 is used here; 3.11+ works.
 
+**💰 This costs nothing to run.** A fake provider ships with the project and
+answers every call locally, so you can watch real enforcement without a
+provider account or a single cent of spend.
+
+Run these four in order:
+
 ```bash
-make setup                      # venv, dependencies, Redis + PostgreSQL via brew, .env
-make infra-up                   # start Redis (project config) and PostgreSQL
-make db-create migrate seed     # schema + 4 teams, 12 agents, 11 models
-make demo                       # mock provider + proxy, then walk every scenario
+make setup                      # 1. venv, dependencies, Redis + PostgreSQL via brew, .env
+make infra-up                   # 2. start Redis and PostgreSQL
+make db-create migrate seed     # 3. create the database + 4 teams, 12 agents, 11 models
+make demo                       # 4. start everything and walk every scenario
 ```
 
-Then open **http://127.0.0.1:8000/dashboard**.
+| Step | What it does | How you know it worked |
+|---|---|---|
+| 1 | Installs Python packages and the two databases | ends without an error |
+| 2 | Starts Redis and PostgreSQL | prints `PONG` and `accepting connections` |
+| 3 | Builds the tables and fills in a demo fleet | prints twelve `sk-agent-…` keys |
+| 4 | Starts the proxy and runs traffic through it | prints scenario results, ends with `✓ Redis and the ledger agree exactly` |
+
+Then open **http://127.0.0.1:8000/dashboard** 🎉
 
 `make seed` prints twelve API keys **once**. They are stored only as HMACs and
 cannot be recovered — rotate a key from the dashboard if you lose one.
@@ -171,7 +233,7 @@ python -m loadgen.main --scenario mixed --calls 20   # generate traffic
 
 ---
 
-## Using it from an agent
+## 🔌 Using it from an agent
 
 Point any OpenAI-compatible client at the proxy:
 
@@ -235,7 +297,7 @@ Every error uses one envelope, whichever layer produced it:
 
 ---
 
-## The dashboard
+## 📊 The dashboard
 
 Five pages, served as static files with **no build step** — native ES modules,
 hand-rolled SVG charts, no bundler and no CDN. Live data arrives over SSE with a
@@ -328,7 +390,7 @@ is stored.
 
 ---
 
-## Enforcement model
+## 🛡️ Enforcement model
 
 ### The three scopes
 
@@ -373,7 +435,7 @@ would be worse than no control at all.
 
 ---
 
-## Features in detail
+## ✨ Features in detail
 
 ### Model catalog and providers
 
@@ -526,10 +588,10 @@ that window is where requests slip through.
 
 ---
 
-## API reference
+## 📡 API reference
 
 44 endpoints. `/admin/*` is unauthenticated — see the security note under
-[Known limitations](#known-limitations).
+[Known limitations](#-known-limitations).
 
 ### Proxy
 
@@ -620,7 +682,7 @@ characters and which source currently wins.
 
 ---
 
-## Data model
+## 🗄️ Data model
 
 PostgreSQL is the **log of record**: configuration plus one immutable
 `call_ledger` row per settled call. Every Redis counter can be rebuilt from it,
@@ -688,7 +750,7 @@ message`
 
 ---
 
-## Redis keyspace
+## 🔑 Redis keyspace
 
 Every key carries a `{team:N}` hash tag. On standalone Redis that is cosmetic,
 but it means the scope keys touched by one `reserve.lua` call always hash to the
@@ -720,7 +782,7 @@ All monetary values are integer micro-dollars.
 
 ---
 
-## The Lua scripts
+## ⚡ The Lua scripts
 
 Enforcement lives entirely here. Python assembles arguments and translates
 return values; it never decides.
@@ -770,7 +832,7 @@ Cluster.
 
 ---
 
-## Code layout
+## 📁 Code layout
 
 ```
 app/
@@ -831,7 +893,7 @@ alembic/versions/      7 migrations
 
 ---
 
-## Configuration
+## ⚙️ Configuration
 
 Everything is environment-driven; see `.env.example`.
 
@@ -864,7 +926,7 @@ Everything is environment-driven; see `.env.example`.
 
 ---
 
-## Testing
+## 🧪 Testing
 
 **135 tests**, all green.
 
@@ -922,7 +984,7 @@ ends with a reconciliation check.
 
 ---
 
-## Operations
+## 🔧 Operations
 
 ```bash
 make infra-up                        # Redis + PostgreSQL
@@ -955,7 +1017,7 @@ Its default `redis.conf` loads four modules the bottle does not ship, so
 
 ---
 
-## Design decisions and trade-offs
+## ⚖️ Design decisions and trade-offs
 
 **Money is integer micro-dollars.** `$500.00` → `500_000_000`. Floats drift over
 tens of thousands of calls, and Lua 5.1 numbers are IEEE doubles — µ$ keeps a
@@ -1010,7 +1072,7 @@ plane should not need, or a bundler. Static assets are served with
 
 ---
 
-## Known limitations
+## ⚠️ Known limitations
 
 - **Streaming responses are not proxied.** The mock implements SSE and the
   settle path is shaped for a usage-bearing final chunk, but the proxy handles
@@ -1049,7 +1111,7 @@ plane should not need, or a bundler. Static assets are served with
 
 ---
 
-## Troubleshooting
+## 🩺 Troubleshooting
 
 **`brew services start redis` fails** — expected; see above. Use
 `make infra-up`.
