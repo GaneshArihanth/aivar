@@ -25,7 +25,7 @@ agent ──▶ Agent Budget Controller ──▶ OpenAI / Anthropic / Gemini / 
 | **When money runs low** | 80% warn → 90% downgrade to a cheaper model → 100% refuse → runaway pause |
 | **Stack** | FastAPI · Redis + Lua · PostgreSQL · vanilla-JS dashboard, no build step |
 | **Providers** | OpenAI · Anthropic · Gemini · Ollama / vLLM / any OpenAI-compatible endpoint |
-| **Tests** | 134, including a 500-way concurrency proof |
+| **Tests** | 135, including a 500-way concurrency proof |
 
 ---
 
@@ -866,7 +866,7 @@ Everything is environment-driven; see `.env.example`.
 
 ## Testing
 
-**134 tests**, all green.
+**135 tests**, all green.
 
 ```bash
 make test           # everything
