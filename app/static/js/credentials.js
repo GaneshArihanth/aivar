@@ -18,7 +18,7 @@ export function editCredential(cred, onDone) {
   const stored = cred.source === "stored";
 
   const handle = openModal({
-    title: `Set ${cred.env_name}`,
+    title: stored ? `Replace ${cred.env_name}` : `Set ${cred.env_name}`,
     size: "sm",
     body: `
       <p class="dialog-message">
@@ -41,10 +41,21 @@ export function editCredential(cred, onDone) {
         <p class="field-hint">
           The key itself, not the variable name.
           ${stored ? `Replaces the stored key ending <code>${esc(cred.last4 || "")}</code>.` : ""}
+          ${
+            !stored && cred.has_env_default
+              ? "This provider already has a key from the deployment; saving here overrides it until you remove it again."
+              : ""
+          }
         </p>
       </div>`,
     footer: `
-      ${stored ? '<button class="btn btn--danger" data-act="clear">Remove</button>' : ""}
+      ${
+        stored
+          ? `<button class="btn btn--danger" data-act="clear">${
+              cred.has_env_default ? "Revert to deployed key" : "Remove"
+            }</button>`
+          : ""
+      }
       <button class="btn" data-modal-close>Cancel</button>
       <button class="btn btn--primary" data-act="save">Save</button>`,
   });
@@ -84,7 +95,9 @@ export function editCredential(cred, onDone) {
   root.querySelector('[data-act="clear"]')?.addEventListener("click", () =>
     finish(
       () => api.del(`/admin/credentials/${encodeURIComponent(cred.env_name)}`),
-      `${cred.env_name} removed`
+      cred.has_env_default
+        ? `${cred.env_name} reverted to the deployed key`
+        : `${cred.env_name} removed`
     )
   );
 }
@@ -94,30 +107,33 @@ export function credentialsPanel(creds) {
   if (!creds.length) return "";
 
   const row = (c) => {
+    // Says which value is actually in use, not merely that one exists. When a
+    // stored key sits on top of a deployed one, both are worth naming: the
+    // difference decides whether "Remove" unconfigures the provider or simply
+    // reverts to what the deployment supplies.
     let state;
-    if (c.source === "environment") {
-      // Set in the environment, so a stored value would never be consulted.
-      // Saying so prevents the "I set it and nothing changed" confusion.
-      state = `<span class="pill pill--ok">set in environment</span>
-               <span class="cell-sub">deployed config wins; edit .env or SSM to change</span>`;
-    } else if (c.source === "stored") {
+    if (c.source === "stored") {
       state = `<span class="pill pill--ok">stored ····${esc(c.last4 || "")}</span>`;
+      if (c.overrides_environment) {
+        state += `<span class="cell-sub">overriding the deployed key</span>`;
+      }
+    } else if (c.source === "environment") {
+      state = `<span class="pill pill--ok">from deployment</span>
+               <span class="cell-sub">set in .env or SSM — override it here</span>`;
     } else {
       state = `<span class="pill pill--warn">not set</span>`;
     }
+
+    let label = "Set key";
+    if (c.source === "stored") label = "Replace";
+    else if (c.source === "environment") label = "Override";
 
     return `
       <tr>
         <td class="mono">${esc(c.env_name)}</td>
         <td>${state}</td>
         <td class="row-actions">
-          ${
-            c.editable
-              ? `<button class="btn btn--ghost btn--sm" data-cred="${esc(c.env_name)}">
-                   ${c.source === "stored" ? "Replace" : "Set key"}
-                 </button>`
-              : ""
-          }
+          <button class="btn btn--ghost btn--sm" data-cred="${esc(c.env_name)}">${label}</button>
         </td>
       </tr>`;
   };
@@ -130,7 +146,8 @@ export function credentialsPanel(creds) {
           <p class="panel-sub">
             Keys for the endpoints in the catalog above. Stored encrypted, shown
             only by their last four characters, and never returned by the API.
-            A value present in the environment always takes precedence.
+            A key set here overrides one supplied by the deployment; remove it
+            and the deployed value takes over again.
           </p>
         </div>
       </div>

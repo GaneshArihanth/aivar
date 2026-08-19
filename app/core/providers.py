@@ -103,29 +103,34 @@ class UpstreamResult:
 def resolve_credential(api_key_env: str | None) -> str | None:
     """Resolve a provider key from the variable name recorded in the catalog.
 
-    Checks the process environment first, then settings. The second lookup is
-    not redundant: pydantic-settings loads .env into the Settings object and
-    never into os.environ, so an environment-only lookup finds keys under
-    Docker — where compose injects .env as real environment variables — and
-    misses them under `make dev`. The failure that produced was a
-    "'GEMINI_API_KEY' is not set" error pointing at a variable sitting in plain
-    sight in the operator's .env file.
+    Order: a key stored through the dashboard, then the process environment,
+    then settings.
+
+    The stored value wins deliberately. It is an operator override entered
+    after deployment, and the alternative makes the dashboard dishonest: with
+    the environment on top, saving a key while SSM held one would appear to
+    succeed and change nothing. Deleting the stored key reverts to whatever the
+    deployment supplies, so the environment remains the default rather than
+    being overwritten.
+
+    The settings lookup is not redundant with os.environ: pydantic-settings
+    loads .env into the Settings object and never into the process
+    environment, so an environment-only lookup finds keys under Docker — where
+    compose injects .env as real variables — and misses them under `make dev`.
     """
     if not api_key_env:
         return None
+
+    from app.core import credentials
+
+    stored = credentials.get(api_key_env)
+    if stored:
+        return stored
     value = os.environ.get(api_key_env)
     if value:
         return value
     # Same name, lowercased, is the settings field: GEMINI_API_KEY -> gemini_api_key.
-    from_settings = getattr(settings, api_key_env.lower(), None)
-    if from_settings:
-        return from_settings
-    # Last: a key set through the dashboard. Deliberately lowest precedence, so
-    # a value deployed by an operator through SSM or .env always wins over one
-    # submitted through a web form that anyone can reach.
-    from app.core import credentials
-
-    return credentials.get(api_key_env)
+    return getattr(settings, api_key_env.lower(), None) or None
 
 
 # ------------------------------------------------------------------ openai

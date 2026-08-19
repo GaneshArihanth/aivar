@@ -286,9 +286,12 @@ resolves — never the value.
 Below it, **Provider credentials**: set an API key from the browser. A deployed
 instance has no shell, so the alternative is editing an SSM parameter and
 redeploying. Keys are encrypted before storage, shown only by their last four
-characters, and never returned by any endpoint. A value already present in the
-environment wins, and the panel says so rather than letting you save something
-that would be silently ignored.
+characters, and never returned by any endpoint.
+
+A key set here **overrides** whatever the deployment supplies, and removing it
+reverts to that value rather than unconfiguring the provider. So SSM or `.env`
+holds the default and the panel holds the exception — which is the only ordering
+that lets the page honestly claim to have changed something.
 
 ### Demo (`#/demo`)
 

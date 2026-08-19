@@ -54,9 +54,13 @@ class CredentialRequest(BaseModel):
 async def list_credentials(session: AsyncSession = Depends(get_session)) -> dict:
     """Which provider keys are configured, and where each one comes from.
 
-    Reports the source because precedence is not obvious and decides what a
-    "Set key" click will actually achieve: a value in the environment always
-    wins, so overwriting the stored one would appear to do nothing.
+    Every row is editable. A stored key overrides whatever the deployment
+    supplies, and removing it falls back to that default rather than leaving
+    the provider unconfigured — so the environment is a default, not a lock.
+
+    The response distinguishes the two so the UI can say which value is
+    actually in use, and offer "revert to the deployed key" rather than a bare
+    delete when there is something to revert to.
     """
     rows = list(
         (
@@ -70,14 +74,22 @@ async def list_credentials(session: AsyncSession = Depends(get_session)) -> dict
 
     out = []
     for name in names:
-        from_env = bool(os.environ.get(name) or getattr(settings, name.lower(), ""))
+        has_env_default = bool(
+            os.environ.get(name) or getattr(settings, name.lower(), "")
+        )
+        is_stored = name in stored
         out.append(
             {
                 "env_name": name,
                 "is_set": bool(providers.resolve_credential(name)),
-                "source": "environment" if from_env else ("stored" if name in stored else None),
-                "last4": stored.get(name) if not from_env else None,
-                "editable": not from_env,
+                # Which value the proxy will actually send.
+                "source": "stored" if is_stored else ("environment" if has_env_default else None),
+                "last4": stored.get(name),
+                # There is a deployed value underneath, so removing the stored
+                # key reverts rather than unconfiguring.
+                "has_env_default": has_env_default,
+                "overrides_environment": is_stored and has_env_default,
+                "editable": True,
             }
         )
     return {"credentials": out}

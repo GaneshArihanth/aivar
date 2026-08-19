@@ -79,6 +79,9 @@ def test_forced_route_without_a_base_url_falls_back_to_the_mock(monkeypatch):
 
 
 def test_credential_resolves_from_the_environment(monkeypatch):
+    from app.core import credentials
+
+    credentials._cache.pop("GEMINI_API_KEY", None)
     monkeypatch.setenv("GEMINI_API_KEY", "from-environ")
     assert providers.resolve_credential("GEMINI_API_KEY") == "from-environ"
 
@@ -89,6 +92,9 @@ def test_credential_falls_back_to_settings(monkeypatch):
     Without this fallback a key in .env resolves under Docker — where compose
     exports it — and silently does not under `make dev`.
     """
+    from app.core import credentials
+
+    credentials._cache.pop("GEMINI_API_KEY", None)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.setattr(providers.settings, "gemini_api_key", "from-dotenv")
 
@@ -96,6 +102,9 @@ def test_credential_falls_back_to_settings(monkeypatch):
 
 
 def test_environment_wins_over_settings(monkeypatch):
+    from app.core import credentials
+
+    credentials._cache.pop("GEMINI_API_KEY", None)
     monkeypatch.setenv("GEMINI_API_KEY", "from-environ")
     monkeypatch.setattr(providers.settings, "gemini_api_key", "from-dotenv")
 
@@ -236,23 +245,35 @@ def test_stored_credential_round_trips_through_encryption(monkeypatch):
     assert fernet.decrypt(token).decode() == "sk-stored-value-1234"
 
 
-def test_stored_credential_is_the_lowest_precedence(monkeypatch):
-    """Deployed config must beat a value submitted through a public web form."""
+def test_stored_credential_overrides_the_deployment(monkeypatch):
+    """The dashboard is an override, not a fallback.
+
+    If the environment won, saving a key while SSM held one would appear to
+    succeed and change nothing — a dashboard that lies about what it did.
+    """
     from app.core import credentials
 
-    monkeypatch.setitem(credentials._cache, "GEMINI_API_KEY", "from-dashboard")
+    monkeypatch.setenv("GEMINI_API_KEY", "from-environ")
+    monkeypatch.setattr(providers.settings, "gemini_api_key", "from-dotenv")
 
-    # Nothing else set: the stored value is used.
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    monkeypatch.setattr(providers.settings, "gemini_api_key", "")
+    # No stored key: the deployment supplies the value.
+    credentials._cache.pop("GEMINI_API_KEY", None)
+    assert providers.resolve_credential("GEMINI_API_KEY") == "from-environ"
+
+    # Stored key takes over.
+    monkeypatch.setitem(credentials._cache, "GEMINI_API_KEY", "from-dashboard")
     assert providers.resolve_credential("GEMINI_API_KEY") == "from-dashboard"
 
-    # .env wins over it.
-    monkeypatch.setattr(providers.settings, "gemini_api_key", "from-dotenv")
-    assert providers.resolve_credential("GEMINI_API_KEY") == "from-dotenv"
 
-    # The environment wins over both.
+def test_removing_a_stored_key_reverts_to_the_deployment(monkeypatch):
+    """Removal must not leave the provider unconfigured when a default exists."""
+    from app.core import credentials
+
     monkeypatch.setenv("GEMINI_API_KEY", "from-environ")
+    monkeypatch.setitem(credentials._cache, "GEMINI_API_KEY", "from-dashboard")
+    assert providers.resolve_credential("GEMINI_API_KEY") == "from-dashboard"
+
+    credentials._cache.pop("GEMINI_API_KEY", None)
     assert providers.resolve_credential("GEMINI_API_KEY") == "from-environ"
 
 

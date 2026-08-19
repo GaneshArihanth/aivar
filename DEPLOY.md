@@ -416,12 +416,16 @@ four characters — and never logged.
 
 Precedence, highest first:
 
-1. a real environment variable
-2. `.env` / SSM (delivered as environment variables by compose)
-3. a key stored through the dashboard
+1. a key set through the dashboard
+2. a real environment variable
+3. `.env` / SSM (delivered as environment variables by compose)
 
-Deployed configuration therefore always wins, and the panel says so rather than
-letting you save a value that would be silently ignored.
+The dashboard is an **override**, not a fallback. A key stored there takes
+effect immediately even when SSM already holds one, and removing it reverts to
+the deployed value rather than leaving the provider unconfigured — so the
+deployment supplies the default and the panel supplies the exception. The
+alternative would be a dashboard that accepts a key, reports success, and
+changes nothing.
 
 Two things to be clear about before using it:
 
